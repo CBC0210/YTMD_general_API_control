@@ -178,12 +178,12 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             variant="outline"
             size="sm"
             onClick={onToggleRepeat}
-            className={`border-2 hover:scale-105 transition-all ${
+            className={`border-[3px] hover:scale-110 transition-all duration-200 ${
               repeatMode === 'ONE' 
-                ? 'text-blue-400 border-blue-400 bg-blue-400/25 shadow-lg shadow-blue-400/30 font-semibold' : 
+                ? 'text-blue-500 border-blue-500 bg-blue-500/40 shadow-xl shadow-blue-500/50 font-bold scale-110 ring-2 ring-blue-500/50' : 
               repeatMode === 'ALL' 
-                ? 'text-green-400 border-green-400 bg-green-400/25 shadow-lg shadow-green-400/30 font-semibold' : 
-              'text-gray-400 border-gray-500 hover:bg-gray-700'
+                ? 'text-green-500 border-green-500 bg-green-500/40 shadow-xl shadow-green-500/50 font-bold scale-110 ring-2 ring-green-500/50' : 
+              'text-gray-400 border-gray-500 hover:bg-gray-700 hover:border-gray-400'
             }`}
             title={
               repeatMode === 'ONE' ? '單曲循環' :
@@ -192,9 +192,9 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             }
           >
             {repeatMode === 'ONE' ? (
-              <Repeat1 className="w-5 h-5 fill-current" />
+              <Repeat1 className={`${repeatMode === 'ONE' ? 'w-6 h-6' : 'w-5 h-5'} fill-current`} />
             ) : (
-              <Repeat className={`w-5 h-5 ${repeatMode === 'ALL' ? 'fill-current' : ''}`} />
+              <Repeat className={`${repeatMode === 'ALL' ? 'w-6 h-6 fill-current' : 'w-5 h-5'}`} />
             )}
           </Button>
 
@@ -203,14 +203,14 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             variant="outline"
             size="sm"
             onClick={onToggleShuffle}
-            className={`border-2 hover:scale-105 transition-all ${
+            className={`border-[3px] hover:scale-110 transition-all duration-200 ${
               isShuffled 
-                ? 'text-purple-400 border-purple-400 bg-purple-400/25 shadow-lg shadow-purple-400/30 font-semibold' 
-                : 'text-gray-400 border-gray-500 hover:bg-gray-700'
+                ? 'text-purple-500 border-purple-500 bg-purple-500/40 shadow-xl shadow-purple-500/50 font-bold scale-110 ring-2 ring-purple-500/50' 
+                : 'text-gray-400 border-gray-500 hover:bg-gray-700 hover:border-gray-400'
             }`}
             title={isShuffled ? '關閉隨機播放' : '開啟隨機播放'}
           >
-            <Shuffle className={`w-5 h-5 ${isShuffled ? 'fill-current' : ''}`} />
+            <Shuffle className={`${isShuffled ? 'w-6 h-6 fill-current' : 'w-5 h-5'}`} />
           </Button>
 
           {/* 喜歡 */}
@@ -243,15 +243,15 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             variant="outline"
             size="sm"
             onClick={onToggleMute}
-            className={`border-2 p-2 hover:scale-105 transition-all ${
+            className={`border-[3px] p-2 hover:scale-110 transition-all duration-200 ${
               isMuted 
-                ? 'text-red-400 border-red-400 bg-red-400/25 shadow-lg shadow-red-400/30 font-semibold hover:bg-red-400/35' 
-                : 'text-gray-300 border-gray-600 hover:bg-gray-700'
+                ? 'text-red-500 border-red-500 bg-red-500/40 shadow-xl shadow-red-500/50 font-bold scale-110 ring-2 ring-red-500/50 hover:bg-red-500/50' 
+                : 'text-gray-300 border-gray-600 hover:bg-gray-700 hover:border-gray-500'
             }`}
             title={isMuted ? "取消靜音" : "靜音"}
           >
             {isMuted ? (
-              <VolumeX className="w-5 h-5 fill-current" />
+              <VolumeX className="w-6 h-6 fill-current" />
             ) : (
               <Volume2 className="w-5 h-5" />
             )}
