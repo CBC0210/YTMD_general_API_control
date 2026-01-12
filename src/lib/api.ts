@@ -15,14 +15,16 @@ function getApiBaseUrl(): string {
     return `http://${ip}:${port}/api/v1`;
   }
   
-  // If no IP parameter, default to localhost
-  // Check environment variable first, otherwise use localhost
+  // If no IP parameter, use current page's hostname (for production deployment)
+  // This ensures the API is accessed on the same machine as the web server
+  // Check environment variable first
   if (importMeta?.env?.VITE_YTMD_API_URL) {
     return importMeta.env.VITE_YTMD_API_URL;
   }
   
-  // Default to localhost
-  return `http://localhost:${port}/api/v1`;
+  // Default to current page's hostname (not localhost, which would point to browser's machine)
+  const currentHost = window.location.hostname;
+  return `http://${currentHost}:${port}/api/v1`;
 }
 
 // Dynamic BASE URL that can be updated
@@ -54,8 +56,9 @@ export function getCurrentTarget(): { ip: string | null; port: string; display: 
     return { ip, port, display: `${ip}:${port}` };
   }
   
-  // Return default localhost (when no parameter provided)
-  return { ip: 'localhost', port, display: `localhost:${port}` };
+  // Return current hostname (when no parameter provided)
+  const currentHost = window.location.hostname;
+  return { ip: currentHost, port, display: `${currentHost}:${port}` };
 }
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
