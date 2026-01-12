@@ -178,14 +178,14 @@ export const api = {
       const data = await j<any>('/song');
       
       // Debug: 記錄完整的 API 響應
-      console.log('[API DEBUG] currentSong response:', JSON.stringify(data, null, 2));
-      console.log('[API DEBUG] elapsedSeconds:', data?.elapsedSeconds, 'type:', typeof data?.elapsedSeconds);
-      console.log('[API DEBUG] songDuration:', data?.songDuration, 'type:', typeof data?.songDuration);
-      console.log('[API DEBUG] isPaused:', data?.isPaused, 'type:', typeof data?.isPaused);
-      console.log('[API DEBUG] videoId:', data?.videoId);
+      // console.log('[API DEBUG] currentSong response:', JSON.stringify(data, null, 2));
+      // console.log('[API DEBUG] elapsedSeconds:', data?.elapsedSeconds, 'type:', typeof data?.elapsedSeconds);
+      // console.log('[API DEBUG] songDuration:', data?.songDuration, 'type:', typeof data?.songDuration);
+      // console.log('[API DEBUG] isPaused:', data?.isPaused, 'type:', typeof data?.isPaused);
+      // console.log('[API DEBUG] videoId:', data?.videoId);
       
       if (!data) {
-        console.warn('[API DEBUG] No data returned from /song endpoint');
+        // console.warn('[API DEBUG] No data returned from /song endpoint');
         return { videoId: null };
       }
       
@@ -226,14 +226,14 @@ export const api = {
         songDuration: typeof songDuration === 'number' ? songDuration : 0,
       };
       
-      console.log('[API DEBUG] Parsed result:', result);
-      if (result.elapsedSeconds === 0 && !isPaused && result.songDuration > 0) {
-        console.warn('[API DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is likely an API limitation. Frontend timer will handle progress.');
-      }
+      // console.log('[API DEBUG] Parsed result:', result);
+      // if (result.elapsedSeconds === 0 && !isPaused && result.songDuration > 0) {
+      //   console.warn('[API DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is likely an API limitation. Frontend timer will handle progress.');
+      // }
       
       return result;
     } catch (error) {
-      console.error('[API DEBUG] Failed to get current song:', error);
+      // console.error('[API DEBUG] Failed to get current song:', error);
       return { videoId: null };
     }
   },
@@ -287,17 +287,19 @@ export const api = {
     insertPosition?: 'INSERT_AT_END' | 'INSERT_AFTER_CURRENT_VIDEO'
   ): Promise<{ success: boolean; message: string }> => {
     try {
-      await j<void>('/queue', {
+      console.log('[PLAY DEBUG] api.enqueue: Sending request with videoId:', song.videoId);
+      const response = await j<void>('/queue', {
         method: 'POST',
         body: JSON.stringify({
           videoId: song.videoId,
           insertPosition: insertPosition || 'INSERT_AT_END',
         }),
       });
+      console.log('[PLAY DEBUG] api.enqueue: Response received:', response);
       return { success: true, message: '歌曲已加入佇列' };
     } catch (error) {
-      console.error('Failed to enqueue:', error);
-      return { success: false, message: '加入佇列失敗' };
+      console.error('[PLAY DEBUG] api.enqueue: Failed to enqueue:', error);
+      return { success: false, message: '加入佇列失敗: ' + (error instanceof Error ? error.message : String(error)) };
     }
   },
   
@@ -325,7 +327,7 @@ export const api = {
       try {
         const cs = await api.currentSong();
         const actualTime = Math.max(0, Math.round(cs.elapsedSeconds || 0));
-        console.log('[API DEBUG] Seek to', seconds, 'API returned elapsedSeconds:', actualTime);
+        // console.log('[API DEBUG] Seek to', seconds, 'API returned elapsedSeconds:', actualTime);
         // 如果 API 返回有效值（接近設置的值），使用 API 的值；否則使用設置的值
         if (actualTime > 0 || Math.abs(actualTime - seconds) < 5) {
           return actualTime;
@@ -335,7 +337,7 @@ export const api = {
       }
       return seconds;
     } catch (error) {
-      console.error('[API DEBUG] Failed to seek:', error);
+      // console.error('[API DEBUG] Failed to seek:', error);
       throw error;
     }
   },
@@ -357,9 +359,9 @@ export const api = {
         const data = await j<any>('/volume');
         
         // Debug: 記錄完整的 API 響應
-        console.log('[API DEBUG] volume response:', JSON.stringify(data, null, 2));
-        console.log('[API DEBUG] volume.state:', data?.state, 'type:', typeof data?.state);
-        console.log('[API DEBUG] volume.isMuted:', data?.isMuted, 'type:', typeof data?.isMuted);
+        // console.log('[API DEBUG] volume response:', JSON.stringify(data, null, 2));
+        // console.log('[API DEBUG] volume.state:', data?.state, 'type:', typeof data?.state);
+        // console.log('[API DEBUG] volume.isMuted:', data?.isMuted, 'type:', typeof data?.isMuted);
         
         // 嘗試多種可能的字段名
         const state = data?.state ?? 
@@ -377,14 +379,14 @@ export const api = {
           isMuted: typeof isMuted === 'boolean' ? isMuted : false,
         };
         
-        console.log('[API DEBUG] Parsed volume result:', result);
-        if (result.state === 0 && !result.isMuted) {
-          console.warn('[API DEBUG] WARNING: API returned volume=0 but not muted. This may be an API limitation. Frontend state will be preserved if local volume > 0.');
-        }
+        // console.log('[API DEBUG] Parsed volume result:', result);
+        // if (result.state === 0 && !result.isMuted) {
+        //   console.warn('[API DEBUG] WARNING: API returned volume=0 but not muted. This may be an API limitation. Frontend state will be preserved if local volume > 0.');
+        // }
         
         return result;
       } catch (error) {
-        console.error('[API DEBUG] Failed to get volume:', error);
+        // console.error('[API DEBUG] Failed to get volume:', error);
         return { state: 0, isMuted: false };
       }
     },
@@ -399,7 +401,7 @@ export const api = {
         // 如果 API 不支持，返回設置的值
         try {
           const current = await api.volume.get();
-          console.log('[API DEBUG] Volume set to', v, 'API returned:', current);
+          // console.log('[API DEBUG] Volume set to', v, 'API returned:', current);
           // 如果 API 返回有效值，使用 API 的值；否則使用設置的值
           if (current.state > 0 || (current.state === 0 && v === 0)) {
             return current;
@@ -409,7 +411,7 @@ export const api = {
         }
         return { state: v, isMuted: false };
       } catch (error) {
-        console.error('[API DEBUG] Failed to set volume:', error);
+        // console.error('[API DEBUG] Failed to set volume:', error);
         throw error;
       }
     },

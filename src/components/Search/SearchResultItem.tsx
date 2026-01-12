@@ -69,7 +69,8 @@ export const SearchResultItem: React.FC<SearchResultItemProps> = ({
     if (clickedButton || clickedMenu || clickedContainer) {
       return;
     }
-    console.log('SearchResultItem: Calling onPlay for song:', song.title);
+    console.log('[PLAY DEBUG] SearchResultItem: onPlay triggered');
+    console.log('[PLAY DEBUG] - Song:', { title: song.title, artist: song.artist, videoId: song.videoId, id: song.id });
     onPlay(song);
   };
 

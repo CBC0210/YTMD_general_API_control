@@ -106,17 +106,18 @@ export default function App() {
 
   // Play song from start (添加歌曲 -> 定位 -> 刪除其他非正在播放的歌曲)
   const playSongFromStart = async (song: Song) => {
-    console.log('playSongFromStart called for song:', song.title);
+    console.log('[PLAY DEBUG] ========== playSongFromStart START ==========');
+    console.log('[PLAY DEBUG] Song:', { title: song.title, artist: song.artist, videoId: song.videoId, id: song.id });
     try {
       const sid = song.videoId || song.id;
       if (!sid) {
-        console.log('playSongFromStart: No videoId or id found');
+        console.error('[PLAY DEBUG] ERROR: No videoId or id found in song:', song);
         return;
       }
       
       // 若此歌曲已在加入中，阻止重複點擊
       if (adding.has(sid)) {
-        console.log('playSongFromStart: Song already being added');
+        console.warn('[PLAY DEBUG] Song already being added, skipping:', sid);
         return;
       }
       
@@ -125,109 +126,314 @@ export default function App() {
       setInfoMsg("正在播放，請稍候…");
       const clearInfo = setTimeout(() => setInfoMsg(""), 2500);
       
-      console.log('playSongFromStart: Step 1 - Adding song to queue with videoId:', sid);
-
-      // 步驟 1: 添加對應歌曲
-      const enqueueResult = await api.enqueue(
-        {
-          videoId: sid,
-          title: song.title,
-          artist: song.artist,
-          duration: song.duration,
-          thumbnail: song.thumbnail,
-        },
-        nickname || undefined,
-        'INSERT_AT_END'
-      );
-      console.log('playSongFromStart: Enqueue result:', enqueueResult);
+      console.log('[PLAY DEBUG] Step 1: Adding song to queue');
+      console.log('[PLAY DEBUG] - videoId:', sid);
+      console.log('[PLAY DEBUG] - title:', song.title);
+      console.log('[PLAY DEBUG] - artist:', song.artist);
       
-      // 步驟 2: 獲取佇列並定位到該歌曲
-      console.log('playSongFromStart: Step 2 - Getting queue and finding song index');
-      // 等待一小段時間確保 API 已處理
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // 重試查找歌曲索引（最多重試 10 次）
+      // 先檢查歌曲是否已經在佇列中
+      const initialQueue = await api.queue();
+      console.log('[PLAY DEBUG] - Initial queue length:', initialQueue.length);
+      const alreadyInQueue = initialQueue.findIndex(item => String(item.videoId) === String(sid));
       let songIndex = -1;
-      let retries = 0;
-      while (songIndex < 0 && retries < 10) {
+      
+      if (alreadyInQueue >= 0) {
+        console.log('[PLAY DEBUG] - Song already in queue at index:', alreadyInQueue);
+        songIndex = alreadyInQueue;
+        // 跳過 enqueue，直接使用現有的索引
+      } else {
+        console.log('[PLAY DEBUG] - Song not in queue, will add it');
+        
+        // 如果佇列已滿（50 首），刪除一些舊的歌曲（保留當前播放的）
+        if (initialQueue.length >= 50) {
+          console.log('[PLAY DEBUG] - Queue is full (50 items), removing old songs...');
+          try {
+            const currentSong = await api.currentSong();
+            const currentVideoId = currentSong.videoId;
+            console.log('[PLAY DEBUG] - Current playing videoId:', currentVideoId);
+            
+            // 刪除除了當前播放歌曲之外的所有歌曲
+            const songsToDelete = initialQueue
+              .filter(item => item.videoId !== currentVideoId)
+              .map(item => item.index)
+              .sort((a, b) => b - a); // 倒序刪除避免索引變化
+            
+            console.log('[PLAY DEBUG] - Songs to delete:', songsToDelete.length, 'indices:', songsToDelete.slice(0, 10));
+            
+            // 只刪除一部分，保留一些空間
+            for (const idx of songsToDelete.slice(0, 40)) {
+              try {
+                await api.queueDelete(idx);
+              } catch (error) {
+                console.error('[PLAY DEBUG] - Failed to delete index', idx, ':', error);
+              }
+            }
+            
+            console.log('[PLAY DEBUG] - Old songs removed, waiting for API to process...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (error) {
+            console.error('[PLAY DEBUG] - Failed to remove old songs:', error);
+            // 繼續嘗試添加，可能 API 會自動處理
+          }
+        }
+
+        // 步驟 1: 添加對應歌曲
+        // 嘗試使用 INSERT_AFTER_CURRENT_VIDEO 而不是 INSERT_AT_END
+        // 這樣即使佇列滿了，也能插入到當前歌曲之後
+        console.log('[PLAY DEBUG] - Attempting to enqueue with INSERT_AFTER_CURRENT_VIDEO');
+        const enqueueResult = await api.enqueue(
+          {
+            videoId: sid,
+            title: song.title,
+            artist: song.artist,
+            duration: song.duration,
+            thumbnail: song.thumbnail,
+          },
+          nickname || undefined,
+          'INSERT_AFTER_CURRENT_VIDEO'
+        );
+        console.log('[PLAY DEBUG] Step 1 Result: Enqueue completed');
+        console.log('[PLAY DEBUG] - Enqueue result:', enqueueResult);
+        
+        // 檢查 enqueue 是否成功
+        if (!enqueueResult || !enqueueResult.success) {
+          console.error('[PLAY DEBUG] ERROR: Enqueue failed!', enqueueResult);
+          throw new Error(enqueueResult?.message || '加入佇列失敗');
+        }
+        
+        // 步驟 2: 獲取佇列並定位到該歌曲
+        console.log('[PLAY DEBUG] Step 2: Getting queue and finding song index');
+        console.log('[PLAY DEBUG] - Waiting 500ms for API to process...');
+        // 等待更長時間確保 API 已處理
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 重試查找歌曲索引（最多重試 10 次）
+        songIndex = -1;
+        let retries = 0;
+        let lastQueue: any[] = [];
+        while (songIndex < 0 && retries < 10) {
         const updatedQueue = await api.queue();
-        console.log('playSongFromStart: Queue items (retry', retries, '):', updatedQueue.map(q => ({ videoId: q.videoId, index: q.index, title: q.title })));
-        songIndex = updatedQueue.findIndex(item => item.videoId === sid);
-        console.log('playSongFromStart: Found song at index:', songIndex, 'retry:', retries, 'looking for videoId:', sid);
+        lastQueue = updatedQueue; // 保存最後一次獲取的佇列
+        
+        // 詳細記錄佇列內容，特別是 videoId 的格式
+        console.log('[PLAY DEBUG] - Queue items (retry', retries, '):', updatedQueue.map(q => ({ 
+          videoId: q.videoId, 
+          videoIdType: typeof q.videoId,
+          index: q.index, 
+          title: q.title 
+        })));
+        
+        // 輸出前 10 個和後 10 個項目的完整信息以便調試
+        if (retries === 0 || retries === 9) {
+          const first10 = updatedQueue.slice(0, 10).map(q => ({
+            videoId: q.videoId,
+            videoIdString: String(q.videoId),
+            videoIdLength: String(q.videoId).length,
+            index: q.index,
+            title: q.title
+          }));
+          const last10 = updatedQueue.slice(-10).map(q => ({
+            videoId: q.videoId,
+            videoIdString: String(q.videoId),
+            videoIdLength: String(q.videoId).length,
+            index: q.index,
+            title: q.title
+          }));
+          console.log('[PLAY DEBUG] - First 10 queue items:', first10);
+          console.log('[PLAY DEBUG] - Last 10 queue items:', last10);
+          
+          // 檢查整個佇列是否有匹配
+          const allVideoIds = updatedQueue.map(q => String(q.videoId));
+          console.log('[PLAY DEBUG] - All videoIds in queue (first 20):', allVideoIds.slice(0, 20));
+          console.log('[PLAY DEBUG] - Looking for:', sid);
+          console.log('[PLAY DEBUG] - Exact match in queue?', allVideoIds.includes(sid));
+          console.log('[PLAY DEBUG] - Case-insensitive match?', allVideoIds.some(id => id.toLowerCase() === sid.toLowerCase()));
+        }
+        
+        // 嘗試多種匹配方式
+        songIndex = updatedQueue.findIndex(item => {
+          const itemVideoId = String(item.videoId || '');
+          const searchId = String(sid || '');
+          
+          // 直接匹配
+          if (itemVideoId === searchId) {
+            console.log('[PLAY DEBUG] - Found exact match at index:', updatedQueue.indexOf(item));
+            return true;
+          }
+          // 字符串比較（忽略大小寫）
+          if (itemVideoId.toLowerCase() === searchId.toLowerCase()) {
+            console.log('[PLAY DEBUG] - Found case-insensitive match at index:', updatedQueue.indexOf(item));
+            return true;
+          }
+          // 檢查是否包含（但只在長度相近時）
+          if (itemVideoId.length > 0 && searchId.length > 0) {
+            if (itemVideoId.includes(searchId) || searchId.includes(itemVideoId)) {
+              console.log('[PLAY DEBUG] - Found partial match at index:', updatedQueue.indexOf(item), 'itemVideoId:', itemVideoId, 'searchId:', searchId);
+              return true;
+            }
+          }
+          return false;
+        });
+        
+        console.log('[PLAY DEBUG] - Looking for videoId:', sid, '(type:', typeof sid, ')');
+        console.log('[PLAY DEBUG] - Found song at index:', songIndex, 'retry:', retries);
+        
+        if (songIndex >= 0) {
+          const foundItem = updatedQueue[songIndex];
+          console.log('[PLAY DEBUG] - Found item details:', {
+            videoId: foundItem.videoId,
+            videoIdType: typeof foundItem.videoId,
+            index: foundItem.index,
+            title: foundItem.title
+          });
+        }
+        
+          if (songIndex < 0) {
+            retries++;
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
         
         if (songIndex < 0) {
-          retries++;
-          await new Promise(resolve => setTimeout(resolve, 300));
+        console.error('[PLAY DEBUG] ERROR: Failed to find song in queue after', retries, 'retries');
+        console.error('[PLAY DEBUG] - Looking for videoId:', sid, '(type:', typeof sid, ')');
+        console.error('[PLAY DEBUG] - Final queue length:', lastQueue.length);
+        console.error('[PLAY DEBUG] - Final queue videoIds (first 10):', lastQueue.slice(0, 10).map(q => ({
+          videoId: q.videoId,
+          videoIdString: String(q.videoId),
+          videoIdType: typeof q.videoId,
+          index: q.index,
+          title: q.title
+        })));
+        
+        // 檢查是否有任何項目的 videoId 包含我們要找的 ID
+        const allVideoIds = lastQueue.map(q => String(q.videoId || ''));
+        console.error('[PLAY DEBUG] - All videoIds in final queue (first 30):', allVideoIds.slice(0, 30));
+        console.error('[PLAY DEBUG] - Looking for videoId:', sid, '(as string:', String(sid), ')');
+        
+        const exactMatches = lastQueue.filter(q => String(q.videoId) === String(sid));
+        const caseInsensitiveMatches = lastQueue.filter(q => String(q.videoId).toLowerCase() === String(sid).toLowerCase());
+        const partialMatches = lastQueue.filter(q => {
+          const qId = String(q.videoId || '');
+          const sId = String(sid || '');
+          return qId.includes(sId) || sId.includes(qId);
+        });
+        
+        if (exactMatches.length > 0) {
+          console.error('[PLAY DEBUG] - Found EXACT matches:', exactMatches.map(q => ({
+            videoId: q.videoId,
+            index: q.index,
+            title: q.title
+          })));
+        }
+        if (caseInsensitiveMatches.length > 0) {
+          console.error('[PLAY DEBUG] - Found case-insensitive matches:', caseInsensitiveMatches.map(q => ({
+            videoId: q.videoId,
+            index: q.index,
+            title: q.title
+          })));
+        }
+        if (partialMatches.length > 0) {
+          console.error('[PLAY DEBUG] - Found partial matches:', partialMatches.map(q => ({
+            videoId: q.videoId,
+            index: q.index,
+            title: q.title
+          })));
+        }
+        
+          // 檢查 enqueue 是否真的成功了
+          console.error('[PLAY DEBUG] - Enqueue result was:', enqueueResult);
+          
+          // 檢查佇列長度是否增加了
+          console.error('[PLAY DEBUG] - Queue length:', lastQueue.length);
+          throw new Error('歌曲未成功添加到佇列');
+        }
+      } // else: song already in queue, use existing songIndex
+      
+      // 步驟 3: 先刪除其他歌曲（在設置 queue index 之前），避免索引變化問題
+      console.log('[PLAY DEBUG] Step 3: Deleting other songs before setting queue index');
+      const queueBeforeDelete = await api.queue();
+      console.log('[PLAY DEBUG] - Queue before delete, length:', queueBeforeDelete.length);
+      
+      // 找出所有不是目標歌曲的索引，倒序刪除避免位移
+      const targetsToDelete = queueBeforeDelete
+        .filter((it) => String(it.videoId) !== String(sid))
+        .map((it) => it.index)
+        .sort((a, b) => b - a);
+      console.log('[PLAY DEBUG] - Songs to delete:', targetsToDelete.length, 'indices:', targetsToDelete);
+      
+      // 逐個刪除，每次刪除後等待一下
+      for (const idx of targetsToDelete) {
+        try {
+          console.log('[PLAY DEBUG] - Deleting queue item at index:', idx);
+          await api.queueDelete(idx);
+          console.log('[PLAY DEBUG] - Deleted queue item at index:', idx);
+          // 等待一下讓 API 處理索引變化
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+          console.error('[PLAY DEBUG] ERROR: Failed to delete queue item at index', idx, ':', error);
+          // 如果刪除失敗，繼續下一個，不要中斷
         }
       }
+      console.log('[PLAY DEBUG] - Finished deleting other songs');
       
-      if (songIndex < 0) {
-        console.error('playSongFromStart: Failed to find song in queue after retries');
-        throw new Error('歌曲未成功添加到佇列');
+      // 等待一下讓 API 處理所有刪除操作
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // 重新獲取佇列，確認目標歌曲的索引
+      const queueAfterDelete = await api.queue();
+      console.log('[PLAY DEBUG] - Queue after delete, length:', queueAfterDelete.length);
+      const newSongIndex = queueAfterDelete.findIndex(item => String(item.videoId) === String(sid));
+      console.log('[PLAY DEBUG] - Target song index after delete:', newSongIndex);
+      
+      if (newSongIndex < 0) {
+        console.error('[PLAY DEBUG] ERROR: Target song not found after deleting others');
+        throw new Error('歌曲在刪除其他歌曲後未找到');
       }
       
-      // 步驟 3: 定位到該歌曲並播放
-      console.log('playSongFromStart: Step 3 - Setting queue index to:', songIndex);
+      // 步驟 4: 定位到該歌曲並播放
+      console.log('[PLAY DEBUG] Step 4: Setting queue index and playing');
+      console.log('[PLAY DEBUG] - Queue index to set:', newSongIndex);
       try {
-        await api.setQueueIndex(songIndex);
-        console.log('playSongFromStart: Queue index set successfully');
+        await api.setQueueIndex(newSongIndex);
+        console.log('[PLAY DEBUG] - Queue index set successfully');
       } catch (error) {
-        console.error('playSongFromStart: Failed to set queue index:', error);
+        console.error('[PLAY DEBUG] ERROR: Failed to set queue index:', error);
         throw error;
       }
       
       try {
+        console.log('[PLAY DEBUG] - Sending play command...');
         await api.control('play');
-        console.log('playSongFromStart: Play command sent successfully');
+        console.log('[PLAY DEBUG] - Play command sent successfully');
       } catch (error) {
-        console.error('playSongFromStart: Failed to play:', error);
+        console.error('[PLAY DEBUG] ERROR: Failed to play:', error);
         throw error;
       }
       
       // 等待一小段時間確保播放已開始
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      // 步驟 4: 刪除其他非正在播放的歌曲（參考 clearQueue 的實現）
-      console.log('playSongFromStart: Step 4 - Getting queue and current song to delete others');
-      const q = await api.queue();
-      const currentSong = await api.currentSong();
-      console.log('playSongFromStart: Current song:', currentSong.videoId, 'Queue length:', q.length);
-      const playingVid = currentSong.videoId;
-      
-      // 找出所有非正在播放的索引，倒序刪除避免位移
-      const targets = q
-        .filter((it) => it.videoId !== playingVid)
-        .map((it) => it.index)
-        .sort((a, b) => b - a);
-      console.log('playSongFromStart: Songs to delete:', targets.length, 'indices:', targets);
-      
-      for (const idx of targets) {
-        try {
-          await api.queueDelete(idx);
-          console.log('playSongFromStart: Deleted queue item at index:', idx);
-        } catch (error) {
-          console.error('playSongFromStart: Failed to delete queue item at index', idx, ':', error);
-        }
-      }
-      console.log('playSongFromStart: Finished deleting other songs');
-      
-      // 立即更新當前歌曲狀態
-      console.log('playSongFromStart: Updating current song state');
+      // 步驟 5: 更新當前歌曲狀態
+      console.log('[PLAY DEBUG] Step 5: Updating current song state');
       const finalCurrentSong = await api.currentSong();
+      console.log('[PLAY DEBUG] - Final current song:', {
+        videoId: finalCurrentSong.videoId,
+        title: finalCurrentSong.title,
+        isPaused: finalCurrentSong.isPaused,
+        elapsedSeconds: finalCurrentSong.elapsedSeconds,
+        songDuration: finalCurrentSong.songDuration
+      });
       currentVideoIdRef.current = finalCurrentSong.videoId;
       setIsPlaying(!finalCurrentSong.isPaused);
       setCurrentTime(finalCurrentSong.elapsedSeconds || 0);
       setSongDuration(finalCurrentSong.songDuration || 0);
-      console.log('playSongFromStart: Current song state updated:', {
-        videoId: finalCurrentSong.videoId,
-        isPaused: finalCurrentSong.isPaused,
-        elapsed: finalCurrentSong.elapsedSeconds
-      });
+      console.log('[PLAY DEBUG] - State updated: isPlaying:', !finalCurrentSong.isPaused, 'currentTime:', finalCurrentSong.elapsedSeconds || 0);
       
       // 刷新佇列
-      console.log('playSongFromStart: Refreshing queue');
+      console.log('[PLAY DEBUG] Step 6: Refreshing queue');
       await refreshQueue();
-      console.log('playSongFromStart: Queue refreshed');
+      console.log('[PLAY DEBUG] - Queue refreshed');
       
       // Add to history if nickname is set
       if (nickname) {
@@ -241,10 +447,12 @@ export default function App() {
       setToastMsg(msg);
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
-      console.log('playSongFromStart: Completed successfully');
+      console.log('[PLAY DEBUG] ========== playSongFromStart SUCCESS ==========');
       
     } catch (error) {
-      console.error('Failed to play song:', error);
+      console.error('[PLAY DEBUG] ========== playSongFromStart ERROR ==========');
+      console.error('[PLAY DEBUG] Error details:', error);
+      console.error('[PLAY DEBUG] Song that failed:', { title: song.title, videoId: song.videoId, id: song.id });
       setToastMsg('播放失敗：' + (error instanceof Error ? error.message : '未知錯誤'));
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
@@ -256,14 +464,26 @@ export default function App() {
 
   // Wrapper for addToQueue hook with UI feedback
   const addToQueue = async (song: Song) => {
+    console.log('[QUEUE DEBUG] addToQueue called for song:', song.title, song.videoId);
     try {
       const sid = song.videoId || song.id;
-      if (sid && adding.has(sid)) return;
+      if (!sid) {
+        console.error('[QUEUE DEBUG] ERROR: No videoId or id found');
+        setToastMsg('加入失敗：缺少歌曲 ID');
+        return;
+      }
+      
+      if (adding.has(sid)) {
+        console.warn('[QUEUE DEBUG] Song already being added, skipping');
+        return;
+      }
+      
       if (sid) setAdding((prev) => new Set(prev).add(sid));
       setInfoMsg("已送出加入佇列，請稍候…");
       const clearInfo = setTimeout(() => setInfoMsg(""), 2500);
 
-      await addToQueueHook(
+      console.log('[QUEUE DEBUG] Calling addToQueueHook with videoId:', sid);
+      const result = await addToQueueHook(
         {
           videoId: song.videoId || song.id,
           title: song.title,
@@ -272,24 +492,65 @@ export default function App() {
           thumbnail: song.thumbnail,
         },
         nickname || undefined,
+        'INSERT_AT_END'
       );
+      console.log('[QUEUE DEBUG] addToQueueHook result:', result);
+      
+      // 等待一下讓 API 處理
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // 驗證歌曲是否真的被添加到佇列
+      const updatedQueue = await api.queue();
+      const found = updatedQueue.some(item => String(item.videoId) === String(sid));
+      console.log('[QUEUE DEBUG] Song in queue after add?', found);
+      
+      if (!found) {
+        console.warn('[QUEUE DEBUG] WARNING: Song not found in queue after add, retrying...');
+        // 重試一次
+        await addToQueueHook(
+          {
+            videoId: song.videoId || song.id,
+            title: song.title,
+            artist: song.artist,
+            duration: song.duration,
+            thumbnail: song.thumbnail,
+          },
+          nickname || undefined,
+          'INSERT_AT_END'
+        );
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const retryQueue = await api.queue();
+        const retryFound = retryQueue.some(item => String(item.videoId) === String(sid));
+        console.log('[QUEUE DEBUG] Song in queue after retry?', retryFound);
+        
+        if (!retryFound) {
+          console.error('[QUEUE DEBUG] ERROR: Song still not in queue after retry');
+          setToastMsg('加入失敗：歌曲未成功添加到佇列');
+          if (sid) setAdding((prev) => { const s = new Set(prev); s.delete(sid); return s; });
+          return;
+        }
+      }
+      
+      // 刷新佇列顯示
+      await refreshQueue();
       
       if (nickname) {
         addToHistory(song);
-      }
-      
-  const title = song.title || "";
-  const artist = song.artist ? ` - ${song.artist}` : "";
-  const msg = `已加入到佇列：${title}${artist}`;
-  setToastMsg(msg);
-  if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-  toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
-      
-      if (nickname) {
         refreshRecommendations();
       }
-    } catch {}
-    finally {
+      
+      const title = song.title || "";
+      const artist = song.artist ? ` - ${song.artist}` : "";
+      const msg = `已加入到佇列：${title}${artist}`;
+      setToastMsg(msg);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+    } catch (error) {
+      console.error('[QUEUE DEBUG] ERROR: Failed to add song to queue:', error);
+      setToastMsg('加入失敗：' + (error instanceof Error ? error.message : '未知錯誤'));
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+    } finally {
       const sid = song.videoId || song.id;
       if (sid) setAdding((prev) => { const s = new Set(prev); s.delete(sid); return s; });
     }
@@ -442,26 +703,26 @@ export default function App() {
     setNicknameInput(saved);
     (async () => {
       try {
-        console.log('[INIT DEBUG] Starting initialization...');
+        // console.log('[INIT DEBUG] Starting initialization...');
         await refreshQueue();
         const cs = await api.currentSong();
-        console.log('[INIT DEBUG] Initial currentSong:', cs);
-        console.log('[INIT DEBUG] elapsedSeconds:', cs.elapsedSeconds, 'type:', typeof cs.elapsedSeconds);
-        console.log('[INIT DEBUG] songDuration:', cs.songDuration, 'type:', typeof cs.songDuration);
+        // console.log('[INIT DEBUG] Initial currentSong:', cs);
+        // console.log('[INIT DEBUG] elapsedSeconds:', cs.elapsedSeconds, 'type:', typeof cs.elapsedSeconds);
+        // console.log('[INIT DEBUG] songDuration:', cs.songDuration, 'type:', typeof cs.songDuration);
         
         currentVideoIdRef.current = cs.videoId;
         const willBePlaying = !cs.isPaused;
         setIsPlaying(willBePlaying);
         const initialTime = Math.max(0, Math.round(cs.elapsedSeconds || 0));
         const initialDuration = Math.max(0, Math.round(cs.songDuration || 0));
-        console.log('[INIT DEBUG] Setting initial currentTime to:', initialTime, 'from API:', cs.elapsedSeconds);
-        console.log('[INIT DEBUG] Setting initial songDuration to:', initialDuration, 'from API:', cs.songDuration);
-        console.log('[INIT DEBUG] isPaused:', cs.isPaused, 'will set isPlaying to:', willBePlaying);
+        // console.log('[INIT DEBUG] Setting initial currentTime to:', initialTime, 'from API:', cs.elapsedSeconds);
+        // console.log('[INIT DEBUG] Setting initial songDuration to:', initialDuration, 'from API:', cs.songDuration);
+        // console.log('[INIT DEBUG] isPaused:', cs.isPaused, 'will set isPlaying to:', willBePlaying);
         
         // 注意：YTMD API 可能無法正確返回 elapsedSeconds，總是返回 0
         // 我們仍然使用 API 的值作為初始值，但前端計時器會處理實際的進度更新
         if (initialTime === 0 && willBePlaying && initialDuration > 0) {
-          console.warn('[INIT DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is a known YTMD API limitation. Frontend timer will handle progress.');
+          // console.warn('[INIT DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is a known YTMD API limitation. Frontend timer will handle progress.');
         }
         
         // 先設置 songDuration，這樣計時器才能正常啟動
@@ -477,47 +738,47 @@ export default function App() {
         // 注意：YTMD API 可能無法正確返回 elapsedSeconds，總是返回 0
         // 我們仍然使用 API 的值作為初始值，但前端計時器會處理實際的進度更新
         if (initialTime === 0 && willBePlaying && initialDuration > 0) {
-          console.warn('[INIT DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is a known YTMD API limitation. Frontend timer will handle progress.');
+          // console.warn('[INIT DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is a known YTMD API limitation. Frontend timer will handle progress.');
         }
         
-        console.log('[INIT DEBUG] After setting states:');
-        console.log('[INIT DEBUG] - isPlaying:', willBePlaying);
-        console.log('[INIT DEBUG] - songDuration:', initialDuration);
-        console.log('[INIT DEBUG] - currentTime:', initialTime);
-        console.log('[INIT DEBUG] - Frontend timer will start automatically if isPlaying=true and songDuration>0');
+        // console.log('[INIT DEBUG] After setting states:');
+        // console.log('[INIT DEBUG] - isPlaying:', willBePlaying);
+        // console.log('[INIT DEBUG] - songDuration:', initialDuration);
+        // console.log('[INIT DEBUG] - currentTime:', initialTime);
+        // console.log('[INIT DEBUG] - Frontend timer will start automatically if isPlaying=true and songDuration>0');
         
         const v = await api.volume.get();
-        console.log('[INIT DEBUG] Initial volume:', v);
+        // console.log('[INIT DEBUG] Initial volume:', v);
         // 如果 API 返回 0 但沒有靜音，可能是 API 問題，使用默認值
         if (typeof v.state === "number" && v.state >= 0 && v.state <= 100) {
           if (v.state === 0 && !v.isMuted) {
-            console.warn('[INIT DEBUG] API returned volume 0 but not muted - likely API issue, using default volume 75');
+            // console.warn('[INIT DEBUG] API returned volume 0 but not muted - likely API issue, using default volume 75');
             setVolume(75); // 使用默認音量
             setIsMuted(false);
           } else {
-            console.log('[INIT DEBUG] Setting volume to:', v.state, 'isMuted:', v.isMuted);
+            // console.log('[INIT DEBUG] Setting volume to:', v.state, 'isMuted:', v.isMuted);
             setVolume(v.state);
             setIsMuted(v.isMuted);
           }
         } else {
-          console.warn('[INIT DEBUG] Invalid volume value, using default');
+          // console.warn('[INIT DEBUG] Invalid volume value, using default');
           setVolume(75); // 使用默認音量
           setIsMuted(false);
         }
         
         const repeat = await api.repeatMode.get();
-        console.log('[INIT DEBUG] Initial repeatMode:', repeat);
+        // console.log('[INIT DEBUG] Initial repeatMode:', repeat);
         setRepeatMode(repeat);
         
         const shuffle = await api.shuffle.get();
-        console.log('[INIT DEBUG] Initial shuffle:', shuffle);
+        // console.log('[INIT DEBUG] Initial shuffle:', shuffle);
         setIsShuffled(shuffle);
         
         // 從用戶設定（localStorage）獲取點贊狀態，而不是從 API
         if (saved && cs.videoId) {
           const likes = userStorage.getLikes(saved);
           const isLiked = likes.some((likedSong: any) => likedSong.videoId === cs.videoId);
-          console.log('[INIT DEBUG] Initial likeState from localStorage:', isLiked ? 'LIKE' : 'INDIFFERENT');
+          // console.log('[INIT DEBUG] Initial likeState from localStorage:', isLiked ? 'LIKE' : 'INDIFFERENT');
           setLikeState(isLiked ? 'LIKE' : 'INDIFFERENT');
         } else {
           setLikeState(null);
@@ -526,9 +787,9 @@ export default function App() {
         if (saved) {
           loadUserData();
         }
-        console.log('[INIT DEBUG] Initialization complete');
+        // console.log('[INIT DEBUG] Initialization complete');
       } catch (error) {
-        console.error('[INIT DEBUG] Initialization error:', error);
+        // console.error('[INIT DEBUG] Initialization error:', error);
       }
     })();
   }, [refreshQueue, loadUserData]);
@@ -611,13 +872,13 @@ export default function App() {
             try {
               // seek 現在會返回實際設置的時間
               const actualTime = await api.seek(seconds);
-              console.log('[APP DEBUG] Seek result, setting currentTime to:', actualTime);
+              // console.log('[APP DEBUG] Seek result, setting currentTime to:', actualTime);
               setCurrentTime(actualTime);
               if (lastSyncTimeRef) {
                 lastSyncTimeRef.current = Date.now();
               }
             } catch (error) {
-              console.error('[APP DEBUG] Seek error:', error);
+              // console.error('[APP DEBUG] Seek error:', error);
               // 即使出錯，也更新本地時間
               setCurrentTime(seconds);
               if (lastSyncTimeRef) {
@@ -631,14 +892,14 @@ export default function App() {
             try {
               // volume.set 現在會返回實際設置的音量
               const result = await api.volume.set(vol);
-              console.log('[APP DEBUG] Volume set result:', result);
+              // console.log('[APP DEBUG] Volume set result:', result);
               // 如果 API 返回有效值，使用 API 的值
               if (result.state > 0 || (result.state === 0 && vol === 0)) {
                 setVolume(result.state);
                 setIsMuted(result.isMuted);
               }
             } catch (error) {
-              console.error('[APP DEBUG] Failed to set volume:', error);
+              // console.error('[APP DEBUG] Failed to set volume:', error);
             }
             if (isMuted && vol > 0) {
               setIsMuted(false);

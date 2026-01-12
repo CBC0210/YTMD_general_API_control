@@ -29,9 +29,31 @@ export function useQueue() {
     insertPosition?: 'INSERT_AT_END' | 'INSERT_AFTER_CURRENT_VIDEO'
   ) => {
     try {
-      await api.enqueue(song, nickname, insertPosition);
+      console.log('[QUEUE DEBUG] useQueue.addToQueue: Adding song', song.videoId, 'with position', insertPosition);
+      const result = await api.enqueue(song, nickname, insertPosition);
+      console.log('[QUEUE DEBUG] useQueue.addToQueue: Enqueue result:', result);
+      
+      if (!result || !result.success) {
+        console.error('[QUEUE DEBUG] useQueue.addToQueue: Enqueue failed:', result);
+        throw new Error(result?.message || '加入佇列失敗');
+      }
+      
+      // 等待一下讓 API 處理
+      await new Promise(resolve => setTimeout(resolve, 300));
       await refreshQueue();
-    } catch {}
+      
+      // 驗證歌曲是否真的被添加
+      const q = await api.queue();
+      const found = q.some(item => String(item.videoId) === String(song.videoId));
+      console.log('[QUEUE DEBUG] useQueue.addToQueue: Song found in queue?', found);
+      
+      if (!found) {
+        console.warn('[QUEUE DEBUG] useQueue.addToQueue: Song not found after add, queue length:', q.length);
+      }
+    } catch (error) {
+      console.error('[QUEUE DEBUG] useQueue.addToQueue: Error:', error);
+      throw error;
+    }
   }, [refreshQueue]);
 
   const removeFromQueue = useCallback(async (songId: string) => {
