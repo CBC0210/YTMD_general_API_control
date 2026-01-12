@@ -92,7 +92,7 @@ export default function App() {
   const userData = useUserData(nickname);
   
   // Use player hook state
-  const { isPlaying, setIsPlaying, currentTime, setCurrentTime, songDuration, setSongDuration, currentVideoIdRef, getCurrentSong, togglePlayPause, playNext, playPrevious, handleGoBack, handleGoForward, seek } = player;
+  const { isPlaying, setIsPlaying, currentTime, setCurrentTime, songDuration, setSongDuration, currentVideoIdRef, getCurrentSong, togglePlayPause, playNext, playPrevious, handleGoBack, handleGoForward, seek, syncTimeFromServer, lastSyncTimeRef } = player;
   
   // Use user data hook state
   const { history, setHistory, likedSongs, setLikedSongs, reco, setReco, recoLoading, loadUserData, addToHistory, removeFromHistory, clearHistory: clearHistoryHook, toggleLike, refreshRecommendations } = userData;
@@ -345,42 +345,53 @@ export default function App() {
     } catch {}
   };
 
-  // 切換喜歡狀態（整合 API）
-  const toggleLikeAPI = async () => {
-    try {
-      const currentLike = await api.like.get();
-      if (currentLike === 'LIKE') {
-        await api.like.dislike();
-      } else {
-        await api.like.set();
-      }
-      const newLike = await api.like.get();
-      setLikeState(newLike);
-      // 同時更新 localStorage（如果用戶已登入）
-      if (nickname && getCurrentSong()) {
-        const song = getCurrentSong()!;
-        if (newLike === 'LIKE') {
-          userStorage.likeSong(nickname, {
-            videoId: song.videoId || song.id,
-            title: song.title,
-            artist: song.artist,
-            duration: song.duration,
-            thumbnail: song.thumbnail,
-          });
-        } else {
-          userStorage.unlikeSong(nickname, song.videoId || song.id);
-        }
-        const likes = userStorage.getLikes(nickname);
-        setLikedSongs((likes || []).map((x: any) => ({
-          id: x.videoId,
-          videoId: x.videoId,
-          title: x.title,
-          artist: x.artist,
-          duration: x.duration,
-          thumbnail: x.thumbnail,
-        })));
-      }
-    } catch {}
+  // 切換喜歡狀態（只保存在用戶設定，不修改 YTMD 賬號）
+  const toggleLikeAPI = () => {
+    if (!nickname) {
+      setToastMsg('請先輸入暱稱以使用點贊功能');
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+      return;
+    }
+    
+    const song = getCurrentSong();
+    if (!song) return;
+    
+    const songId = song.videoId || song.id;
+    if (!songId) return;
+    
+    // 檢查當前歌曲是否已被當前用戶點贊
+    const isLiked = likedSongs.some((likedSong) => (likedSong.videoId || likedSong.id) === songId);
+    
+    if (isLiked) {
+      // 取消點贊
+      userStorage.unlikeSong(nickname, songId);
+      setLikeState('INDIFFERENT');
+    } else {
+      // 點贊
+      userStorage.likeSong(nickname, {
+        videoId: songId,
+        title: song.title,
+        artist: song.artist,
+        duration: song.duration,
+        thumbnail: song.thumbnail,
+      });
+      setLikeState('LIKE');
+    }
+    
+    // 更新喜歡的歌曲列表
+    const likes = userStorage.getLikes(nickname);
+    setLikedSongs((likes || []).map((x: any) => ({
+      id: x.videoId,
+      videoId: x.videoId,
+      title: x.title,
+      artist: x.artist,
+      duration: x.duration,
+      thumbnail: x.thumbnail,
+    })));
+    
+    // 刷新推薦
+    refreshRecommendations();
   };
 
 
@@ -431,27 +442,94 @@ export default function App() {
     setNicknameInput(saved);
     (async () => {
       try {
+        console.log('[INIT DEBUG] Starting initialization...');
         await refreshQueue();
         const cs = await api.currentSong();
+        console.log('[INIT DEBUG] Initial currentSong:', cs);
+        console.log('[INIT DEBUG] elapsedSeconds:', cs.elapsedSeconds, 'type:', typeof cs.elapsedSeconds);
+        console.log('[INIT DEBUG] songDuration:', cs.songDuration, 'type:', typeof cs.songDuration);
+        
         currentVideoIdRef.current = cs.videoId;
-        setIsPlaying(!cs.isPaused);
-        setCurrentTime(cs.elapsedSeconds || 0);
-        setSongDuration(cs.songDuration || 0);
+        const willBePlaying = !cs.isPaused;
+        setIsPlaying(willBePlaying);
+        const initialTime = Math.max(0, Math.round(cs.elapsedSeconds || 0));
+        const initialDuration = Math.max(0, Math.round(cs.songDuration || 0));
+        console.log('[INIT DEBUG] Setting initial currentTime to:', initialTime, 'from API:', cs.elapsedSeconds);
+        console.log('[INIT DEBUG] Setting initial songDuration to:', initialDuration, 'from API:', cs.songDuration);
+        console.log('[INIT DEBUG] isPaused:', cs.isPaused, 'will set isPlaying to:', willBePlaying);
+        
+        // 注意：YTMD API 可能無法正確返回 elapsedSeconds，總是返回 0
+        // 我們仍然使用 API 的值作為初始值，但前端計時器會處理實際的進度更新
+        if (initialTime === 0 && willBePlaying && initialDuration > 0) {
+          console.warn('[INIT DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is a known YTMD API limitation. Frontend timer will handle progress.');
+        }
+        
+        // 先設置 songDuration，這樣計時器才能正常啟動
+        setSongDuration(initialDuration);
+        // 然後設置 currentTime（即使 API 返回 0，前端計時器會自動開始）
+        setCurrentTime(initialTime);
+        
+        // 初始化時也設置 lastSyncTimeRef，避免立即同步
+        if (lastSyncTimeRef) {
+          lastSyncTimeRef.current = Date.now();
+        }
+        
+        // 注意：YTMD API 可能無法正確返回 elapsedSeconds，總是返回 0
+        // 我們仍然使用 API 的值作為初始值，但前端計時器會處理實際的進度更新
+        if (initialTime === 0 && willBePlaying && initialDuration > 0) {
+          console.warn('[INIT DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is a known YTMD API limitation. Frontend timer will handle progress.');
+        }
+        
+        console.log('[INIT DEBUG] After setting states:');
+        console.log('[INIT DEBUG] - isPlaying:', willBePlaying);
+        console.log('[INIT DEBUG] - songDuration:', initialDuration);
+        console.log('[INIT DEBUG] - currentTime:', initialTime);
+        console.log('[INIT DEBUG] - Frontend timer will start automatically if isPlaying=true and songDuration>0');
+        
         const v = await api.volume.get();
-        setVolume(v.state);
-        setIsMuted(v.isMuted);
+        console.log('[INIT DEBUG] Initial volume:', v);
+        // 如果 API 返回 0 但沒有靜音，可能是 API 問題，使用默認值
+        if (typeof v.state === "number" && v.state >= 0 && v.state <= 100) {
+          if (v.state === 0 && !v.isMuted) {
+            console.warn('[INIT DEBUG] API returned volume 0 but not muted - likely API issue, using default volume 75');
+            setVolume(75); // 使用默認音量
+            setIsMuted(false);
+          } else {
+            console.log('[INIT DEBUG] Setting volume to:', v.state, 'isMuted:', v.isMuted);
+            setVolume(v.state);
+            setIsMuted(v.isMuted);
+          }
+        } else {
+          console.warn('[INIT DEBUG] Invalid volume value, using default');
+          setVolume(75); // 使用默認音量
+          setIsMuted(false);
+        }
+        
         const repeat = await api.repeatMode.get();
+        console.log('[INIT DEBUG] Initial repeatMode:', repeat);
         setRepeatMode(repeat);
+        
         const shuffle = await api.shuffle.get();
+        console.log('[INIT DEBUG] Initial shuffle:', shuffle);
         setIsShuffled(shuffle);
-        try {
-          const like = await api.like.get();
-          setLikeState(like);
-          } catch {}
+        
+        // 從用戶設定（localStorage）獲取點贊狀態，而不是從 API
+        if (saved && cs.videoId) {
+          const likes = userStorage.getLikes(saved);
+          const isLiked = likes.some((likedSong: any) => likedSong.videoId === cs.videoId);
+          console.log('[INIT DEBUG] Initial likeState from localStorage:', isLiked ? 'LIKE' : 'INDIFFERENT');
+          setLikeState(isLiked ? 'LIKE' : 'INDIFFERENT');
+        } else {
+          setLikeState(null);
+        }
+        
         if (saved) {
           loadUserData();
         }
-      } catch {}
+        console.log('[INIT DEBUG] Initialization complete');
+      } catch (error) {
+        console.error('[INIT DEBUG] Initialization error:', error);
+      }
     })();
   }, [refreshQueue, loadUserData]);
 
@@ -472,6 +550,10 @@ export default function App() {
     setLikeState,
     lastVolChangeAt,
     queueTickRef,
+    lastSyncTimeRef,
+    syncTimeFromServer,
+    nickname,
+    likedSongs,
   });
 
   // 點擊外部關閉選單
@@ -498,7 +580,7 @@ export default function App() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold mb-2">
-            YTMD點歌系統
+            YTMD控制系統
           </h1>
           <p className="text-gray-400">由 CBC 修改開發</p>
           <p className="text-gray-500 text-sm mt-2">
@@ -526,12 +608,38 @@ export default function App() {
           onPrevious={playPrevious}
           onNext={playNext}
           onSeek={async (seconds) => {
-            try { await api.seek(seconds); } catch {}
+            try {
+              // seek 現在會返回實際設置的時間
+              const actualTime = await api.seek(seconds);
+              console.log('[APP DEBUG] Seek result, setting currentTime to:', actualTime);
+              setCurrentTime(actualTime);
+              if (lastSyncTimeRef) {
+                lastSyncTimeRef.current = Date.now();
+              }
+            } catch (error) {
+              console.error('[APP DEBUG] Seek error:', error);
+              // 即使出錯，也更新本地時間
+              setCurrentTime(seconds);
+              if (lastSyncTimeRef) {
+                lastSyncTimeRef.current = Date.now();
+              }
+            }
           }}
-          onVolumeChange={(vol) => {
+          onVolumeChange={async (vol) => {
             setVolume(vol);
             lastVolChangeAt.current = Date.now();
-            api.volume.set(vol).catch(() => {});
+            try {
+              // volume.set 現在會返回實際設置的音量
+              const result = await api.volume.set(vol);
+              console.log('[APP DEBUG] Volume set result:', result);
+              // 如果 API 返回有效值，使用 API 的值
+              if (result.state > 0 || (result.state === 0 && vol === 0)) {
+                setVolume(result.state);
+                setIsMuted(result.isMuted);
+              }
+            } catch (error) {
+              console.error('[APP DEBUG] Failed to set volume:', error);
+            }
             if (isMuted && vol > 0) {
               setIsMuted(false);
             }
@@ -845,6 +953,71 @@ export default function App() {
               onClearHistory={clearHistoryHook}
               onDeleteHistoryItem={(s) => setSelectedHistory(s)}
               onAddToQueue={addToQueue}
+              onPlay={playSongFromStart}
+              onInsertAfterCurrent={async (s) => {
+                try {
+                  const songId = s.videoId || s.id;
+                  if (!songId || adding.has(songId)) return;
+                  setAdding((prev) => new Set(prev).add(songId));
+                  
+                  await api.enqueue(
+                    {
+                      videoId: songId,
+                      title: s.title,
+                      artist: s.artist,
+                      duration: s.duration,
+                      thumbnail: s.thumbnail,
+                    },
+                    nickname || undefined,
+                    'INSERT_AFTER_CURRENT_VIDEO'
+                  );
+                  
+                  if (nickname) {
+                    userStorage.addHistory(nickname, {
+                      videoId: songId,
+                      title: s.title,
+                      artist: s.artist,
+                      duration: s.duration,
+                      thumbnail: s.thumbnail,
+                    });
+                    const hist = userStorage.getHistory(nickname);
+                    setHistory(hist.map((x: any) => ({
+                      id: x.videoId,
+                      videoId: x.videoId,
+                      title: x.title,
+                      artist: x.artist,
+                      duration: x.duration,
+                      thumbnail: x.thumbnail,
+                    })));
+                  }
+                  
+                  const q = await api.queue();
+                  setPlayQueue(
+                    q.map((it) => ({
+                      id: `${it.videoId}-${it.index}`,
+                      title: it.title,
+                      artist: it.artist,
+                      duration: it.duration,
+                      videoId: it.videoId,
+                      thumbnail: it.thumbnail,
+                      status: "queued",
+                      queuePosition: it.index,
+                    })) as any,
+                  );
+                  
+                  setToastMsg(`已插播：${s.title}`);
+                  if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                  toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                } catch (error) {
+                  console.error('Failed to insert song:', error);
+                  setToastMsg('插播失敗');
+                  if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                  toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                } finally {
+                  const songId = s.videoId || s.id;
+                  if (songId) setAdding((prev) => { const s = new Set(prev); s.delete(songId); return s; });
+                }
+              }}
               isAdding={(id) => id ? adding.has(id) : false}
               renderAddLabel={renderAddLabel}
               infoMsg={infoMsg}
@@ -858,17 +1031,82 @@ export default function App() {
               <LikedSongs
                 likedSongs={likedExpanded ? likedSongs : likedSongs.slice(0, 5)}
                 onAddToQueue={(song) => {
-                            addToQueue(song);
-                            // 將最近從「喜歡的歌曲」加入的項目移到最上面
-                            setLikedSongs((prev) => {
-                              const id = song.videoId || song.id;
-                              const rest = prev.filter((s) => (s.videoId || s.id) !== id);
-                              return [
-                                { ...song, id: id, videoId: id },
-                                ...rest,
-                              ];
-                            });
-                          }}
+                  addToQueue(song);
+                  // 將最近從「喜歡的歌曲」加入的項目移到最上面
+                  setLikedSongs((prev) => {
+                    const id = song.videoId || song.id;
+                    const rest = prev.filter((s) => (s.videoId || s.id) !== id);
+                    return [
+                      { ...song, id: id, videoId: id },
+                      ...rest,
+                    ];
+                  });
+                }}
+                onPlay={playSongFromStart}
+                onInsertAfterCurrent={async (s) => {
+                  try {
+                    const songId = s.videoId || s.id;
+                    if (!songId || adding.has(songId)) return;
+                    setAdding((prev) => new Set(prev).add(songId));
+                    
+                    await api.enqueue(
+                      {
+                        videoId: songId,
+                        title: s.title,
+                        artist: s.artist,
+                        duration: s.duration,
+                        thumbnail: s.thumbnail,
+                      },
+                      nickname || undefined,
+                      'INSERT_AFTER_CURRENT_VIDEO'
+                    );
+                    
+                    if (nickname) {
+                      userStorage.addHistory(nickname, {
+                        videoId: songId,
+                        title: s.title,
+                        artist: s.artist,
+                        duration: s.duration,
+                        thumbnail: s.thumbnail,
+                      });
+                      const hist = userStorage.getHistory(nickname);
+                      setHistory(hist.map((x: any) => ({
+                        id: x.videoId,
+                        videoId: x.videoId,
+                        title: x.title,
+                        artist: x.artist,
+                        duration: x.duration,
+                        thumbnail: x.thumbnail,
+                      })));
+                    }
+                    
+                    const q = await api.queue();
+                    setPlayQueue(
+                      q.map((it) => ({
+                        id: `${it.videoId}-${it.index}`,
+                        title: it.title,
+                        artist: it.artist,
+                        duration: it.duration,
+                        videoId: it.videoId,
+                        thumbnail: it.thumbnail,
+                        status: "queued",
+                        queuePosition: it.index,
+                      })) as any,
+                    );
+                    
+                    setToastMsg(`已插播：${s.title}`);
+                    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                    toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                  } catch (error) {
+                    console.error('Failed to insert song:', error);
+                    setToastMsg('插播失敗');
+                    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                    toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                  } finally {
+                    const songId = s.videoId || s.id;
+                    if (songId) setAdding((prev) => { const s = new Set(prev); s.delete(songId); return s; });
+                  }
+                }}
                 onToggleLike={toggleLike}
                 isAdding={(id) => id ? adding.has(id) : false}
                 renderAddLabel={renderAddLabel}
@@ -911,37 +1149,115 @@ export default function App() {
                   {infoMsg && (
                     <div className="text-xs text-gray-400">{infoMsg}</div>
                   )}
-                  {reco.map((song) => (
-                    <div
-                      key={song.id}
-                      className="flex items-center justify-between p-3 bg-gray-700 rounded-lg"
-                    >
-                      <div className="flex items-center gap-3 flex-1">
-                        {song.thumbnail && (
-                          <img src={song.thumbnail} alt="thumb" className="w-10 h-10 object-cover rounded" />
-                        )}
-                        <div className="flex-1">
-                          <h4 className="font-medium">{song.title}</h4>
-                          <p className="text-gray-400 text-sm">
-                            {song.artist}{song.album ? ` • ${song.album}` : ''}{song.duration ? ` • ${song.duration}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => addToQueue(song)}
-                        disabled={!!(song.videoId || song.id) && adding.has(song.videoId || song.id)}
-                        style={{ backgroundColor: "#e74c3c" }}
-                        className="hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Plus className="w-4 h-4 mr-1" />
-                        {((song.videoId || song.id) && adding.has(song.videoId || song.id)) ? '加入中…' : '加入'}
-                      </Button>
-                    </div>
-                  ))}
                   {reco.length === 0 && (
                     <div className="text-gray-400 text-sm">尚無推薦，請先點幾首歌試試。</div>
                   )}
+                  {reco.map((song) => {
+                    const songId = song.videoId || song.id || '';
+                    return (
+                      <SearchResultItem
+                        key={song.id}
+                        song={song}
+                        onPlay={playSongFromStart}
+                        onAddToQueue={async (s) => {
+                          try {
+                            const songId = s.videoId || s.id;
+                            if (!songId || adding.has(songId)) return;
+                            setAdding((prev) => new Set(prev).add(songId));
+                            await addToQueue(s);
+                            setToastMsg(`已加入佇列：${s.title}`);
+                            if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                            toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                          } catch (error) {
+                            console.error('Failed to add song:', error);
+                            setToastMsg('加入失敗');
+                            if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                            toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                          } finally {
+                            const songId = s.videoId || s.id;
+                            if (songId) setAdding((prev) => { const s = new Set(prev); s.delete(songId); return s; });
+                          }
+                        }}
+                        onInsertAfterCurrent={async (s) => {
+                          try {
+                            const songId = s.videoId || s.id;
+                            if (!songId || adding.has(songId)) return;
+                            setAdding((prev) => new Set(prev).add(songId));
+                            
+                            await api.enqueue(
+                              {
+                                videoId: songId,
+                                title: s.title,
+                                artist: s.artist,
+                                duration: s.duration,
+                                thumbnail: s.thumbnail,
+                              },
+                              nickname || undefined,
+                              'INSERT_AFTER_CURRENT_VIDEO'
+                            );
+                            
+                            if (nickname) {
+                              userStorage.addHistory(nickname, {
+                                videoId: songId,
+                                title: s.title,
+                                artist: s.artist,
+                                duration: s.duration,
+                                thumbnail: s.thumbnail,
+                              });
+                              const hist = userStorage.getHistory(nickname);
+                              setHistory(hist.map((x: any) => ({
+                                id: x.videoId,
+                                videoId: x.videoId,
+                                title: x.title,
+                                artist: x.artist,
+                                duration: x.duration,
+                                thumbnail: x.thumbnail,
+                              })));
+                            }
+                            
+                            const q = await api.queue();
+                            setPlayQueue(
+                              q.map((it) => ({
+                                id: `${it.videoId}-${it.index}`,
+                                title: it.title,
+                                artist: it.artist,
+                                duration: it.duration,
+                                videoId: it.videoId,
+                                thumbnail: it.thumbnail,
+                                status: "queued",
+                                queuePosition: it.index,
+                              })) as any,
+                            );
+                            
+                            setToastMsg(`已插播：${s.title}`);
+                            if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                            toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                          } catch (error) {
+                            console.error('Failed to insert song:', error);
+                            setToastMsg('插播失敗');
+                            if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                            toastTimerRef.current = window.setTimeout(() => setToastMsg(""), 2500) as unknown as number;
+                          } finally {
+                            const songId = s.videoId || s.id;
+                            if (songId) setAdding((prev) => { const s = new Set(prev); s.delete(songId); return s; });
+                          }
+                        }}
+                        isAdding={adding.has(songId)}
+                        isMenuOpen={openMenus.has(songId)}
+                        onMenuToggle={() => {
+                          setOpenMenus((prev) => {
+                            const newSet = new Set(prev);
+                            if (newSet.has(songId)) {
+                              newSet.delete(songId);
+                            } else {
+                              newSet.add(songId);
+                            }
+                            return newSet;
+                          });
+                        }}
+                      />
+                    );
+                  })}
                 </CardContent>
               </Card>
             )}

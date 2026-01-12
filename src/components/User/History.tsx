@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import {
@@ -13,7 +13,7 @@ import {
   AlertDialogTrigger,
 } from "../ui/alert-dialog";
 import { Clock } from "lucide-react";
-import { HistoryRow } from "../History/HistoryRow";
+import { SearchResultItem } from "../Search/SearchResultItem";
 import type { Song } from "../../types";
 
 interface HistoryProps {
@@ -24,6 +24,8 @@ interface HistoryProps {
   onClearHistory: () => void;
   onDeleteHistoryItem: (song: Song) => void;
   onAddToQueue: (song: Song) => void;
+  onPlay: (song: Song) => void;
+  onInsertAfterCurrent: (song: Song) => void;
   isAdding: (id?: string) => boolean;
   renderAddLabel: (id?: string) => string;
   infoMsg?: string;
@@ -37,10 +39,14 @@ export const History: React.FC<HistoryProps> = ({
   onClearHistory,
   onDeleteHistoryItem,
   onAddToQueue,
+  onPlay,
+  onInsertAfterCurrent,
   isAdding,
   renderAddLabel,
   infoMsg,
 }) => {
+  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
+  
   if (!nickname) return null;
 
   return (
@@ -91,16 +97,32 @@ export const History: React.FC<HistoryProps> = ({
         {history.length === 0 && (
           <div className="text-gray-400 text-sm">目前沒有歷史記錄</div>
         )}
-        {(historyExpanded ? history : history.slice(0, 5)).map((song) => (
-          <HistoryRow
-            key={song.id}
-            song={song}
-            onDelete={onDeleteHistoryItem}
-            onAddToQueue={onAddToQueue}
-            isAdding={isAdding(song.videoId || song.id)}
-            renderAddLabel={renderAddLabel}
-          />
-        ))}
+        {(historyExpanded ? history : history.slice(0, 5)).map((song) => {
+          const songId = song.videoId || song.id || '';
+          return (
+            <SearchResultItem
+              key={song.id}
+              song={song}
+              onPlay={onPlay}
+              onAddToQueue={onAddToQueue}
+              onInsertAfterCurrent={onInsertAfterCurrent}
+              onDelete={onDeleteHistoryItem}
+              isAdding={isAdding(songId)}
+              isMenuOpen={openMenus.has(songId)}
+              onMenuToggle={() => {
+                setOpenMenus((prev) => {
+                  const newSet = new Set(prev);
+                  if (newSet.has(songId)) {
+                    newSet.delete(songId);
+                  } else {
+                    newSet.add(songId);
+                  }
+                  return newSet;
+                });
+              }}
+            />
+          );
+        })}
         {history.length > 5 && (
           <div className="pt-1 flex justify-end">
             <button

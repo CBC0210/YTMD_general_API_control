@@ -1,12 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
-import { Heart, Plus } from "lucide-react";
+import { Heart } from "lucide-react";
+import { SearchResultItem } from "../Search/SearchResultItem";
 import type { Song } from "../../types";
 
 interface LikedSongsProps {
   likedSongs: Song[];
   onAddToQueue: (song: Song) => void;
+  onPlay: (song: Song) => void;
+  onInsertAfterCurrent: (song: Song) => void;
   onToggleLike: (song: Song) => void;
   isAdding: (id?: string) => boolean;
   renderAddLabel: (id?: string) => string;
@@ -16,11 +18,15 @@ interface LikedSongsProps {
 export const LikedSongs: React.FC<LikedSongsProps> = ({
   likedSongs,
   onAddToQueue,
+  onPlay,
+  onInsertAfterCurrent,
   onToggleLike,
   isAdding,
   renderAddLabel,
   infoMsg,
 }) => {
+  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
+  
   if (likedSongs.length === 0) return null;
 
   return (
@@ -35,45 +41,34 @@ export const LikedSongs: React.FC<LikedSongsProps> = ({
         {infoMsg && (
           <div className="text-xs text-gray-400">{infoMsg}</div>
         )}
-        {likedSongs.map((song) => (
-          <div
-            key={song.id}
-            className="flex items-center justify-between p-3 bg-gray-700 rounded-lg"
-          >
-            <div className="flex items-center gap-3 flex-1">
-              {song.thumbnail && (
-                <img src={song.thumbnail} alt="thumb" className="w-10 h-10 object-cover rounded" />
-              )}
-              <div className="flex-1">
-                <h4 className="font-medium">{song.title}</h4>
-                <p className="text-gray-400 text-sm">
-                  {song.artist}{song.album ? ` • ${song.album}` : ''}{song.duration ? ` • ${song.duration}` : ''}
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={() => onAddToQueue(song)}
-                disabled={isAdding(song.videoId || song.id)}
-                style={{ backgroundColor: "#e74c3c" }}
-                className="hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                {renderAddLabel(song.videoId || song.id)}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onToggleLike(song)}
-                className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
-                title="取消喜歡"
-              >
-                <Heart className="w-4 h-4 fill-current" />
-              </Button>
-            </div>
-          </div>
-        ))}
+        {likedSongs.map((song) => {
+          const songId = song.videoId || song.id || '';
+          const isLiked = true; // 在喜歡的歌曲列表中，所有歌曲都是已喜歡的
+          return (
+            <SearchResultItem
+              key={song.id}
+              song={song}
+              onPlay={onPlay}
+              onAddToQueue={onAddToQueue}
+              onInsertAfterCurrent={onInsertAfterCurrent}
+              onToggleLike={onToggleLike}
+              isLiked={isLiked}
+              isAdding={isAdding(songId)}
+              isMenuOpen={openMenus.has(songId)}
+              onMenuToggle={() => {
+                setOpenMenus((prev) => {
+                  const newSet = new Set(prev);
+                  if (newSet.has(songId)) {
+                    newSet.delete(songId);
+                  } else {
+                    newSet.add(songId);
+                  }
+                  return newSet;
+                });
+              }}
+            />
+          );
+        })}
       </CardContent>
     </Card>
   );

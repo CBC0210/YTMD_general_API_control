@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../ui/button";
-import { Plus, Play, MoreVertical } from "lucide-react";
+import { Plus, Play, MoreVertical, Trash2, Heart } from "lucide-react";
 import type { Song } from "../../types";
 
 interface SearchResultItemProps {
@@ -12,6 +12,9 @@ interface SearchResultItemProps {
   isAdding: boolean;
   isMenuOpen: boolean;
   onMenuToggle: () => void;
+  onDelete?: (song: Song) => void; // 可選的刪除功能（用於歷史記錄）
+  onToggleLike?: (song: Song) => void; // 可選的喜歡功能（用於喜歡的歌曲）
+  isLiked?: boolean; // 是否已喜歡（用於喜歡的歌曲）
 }
 
 export const SearchResultItem: React.FC<SearchResultItemProps> = ({
@@ -22,6 +25,9 @@ export const SearchResultItem: React.FC<SearchResultItemProps> = ({
   isAdding,
   isMenuOpen,
   onMenuToggle,
+  onDelete,
+  onToggleLike,
+  isLiked,
 }) => {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -173,6 +179,40 @@ export const SearchResultItem: React.FC<SearchResultItemProps> = ({
                   <Play className="w-4 h-4" />
                   {isAdding ? '插播中…' : '插播（當前歌曲後）'}
                 </button>
+                {onDelete && (
+                  <button
+                    className="w-full text-left px-4 py-2 text-white hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed border-t border-gray-700 text-red-400 hover:text-red-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      console.log('SearchResultItem: Delete clicked');
+                      onMenuToggle();
+                      onDelete(song);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    刪除
+                  </button>
+                )}
+                {onToggleLike && (
+                  <button
+                    className={`w-full text-left px-4 py-2 text-white hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed border-t border-gray-700 ${
+                      isLiked ? 'text-red-400 hover:text-red-300' : ''
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      console.log('SearchResultItem: Toggle like clicked');
+                      onMenuToggle();
+                      onToggleLike(song);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
+                    {isLiked ? '取消喜歡' : '加入喜歡'}
+                  </button>
+                )}
               </div>,
               document.body
             );

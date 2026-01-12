@@ -90,18 +90,23 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
           </div>
         </div>
 
-        {/* Progress Bar */}
+        {/* Progress Bar - 顯示相對進度百分比 */}
         <div className="space-y-2">
           <Slider
             value={[currentTime]}
             onValueChange={(value) => onSeek(value[0])}
             max={maxDuration}
             step={1}
-            className="w-full"
+            className="w-full cursor-pointer"
+            title="拖動調整播放進度"
           />
-          <div className="flex justify-between text-sm text-gray-400">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(songDuration || 0)}</span>
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-xs text-gray-500">拖動調整進度</span>
+            <span className="text-gray-300 font-medium">
+              {maxDuration > 0 
+                ? `${Math.round((currentTime / maxDuration) * 100)}%`
+                : '0%'}
+            </span>
           </div>
         </div>
 
@@ -173,10 +178,12 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             variant="outline"
             size="sm"
             onClick={onToggleRepeat}
-            className={`border-gray-600 hover:bg-gray-700 ${
-              repeatMode === 'ONE' ? 'text-blue-400' : 
-              repeatMode === 'ALL' ? 'text-green-400' : 
-              'text-gray-300'
+            className={`border-2 hover:scale-105 transition-all ${
+              repeatMode === 'ONE' 
+                ? 'text-blue-400 border-blue-400 bg-blue-400/25 shadow-lg shadow-blue-400/30 font-semibold' : 
+              repeatMode === 'ALL' 
+                ? 'text-green-400 border-green-400 bg-green-400/25 shadow-lg shadow-green-400/30 font-semibold' : 
+              'text-gray-400 border-gray-500 hover:bg-gray-700'
             }`}
             title={
               repeatMode === 'ONE' ? '單曲循環' :
@@ -185,9 +192,9 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             }
           >
             {repeatMode === 'ONE' ? (
-              <Repeat1 className="w-4 h-4" />
+              <Repeat1 className="w-5 h-5 fill-current" />
             ) : (
-              <Repeat className="w-4 h-4" />
+              <Repeat className={`w-5 h-5 ${repeatMode === 'ALL' ? 'fill-current' : ''}`} />
             )}
           </Button>
 
@@ -196,12 +203,14 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
             variant="outline"
             size="sm"
             onClick={onToggleShuffle}
-            className={`border-gray-600 hover:bg-gray-700 ${
-              isShuffled ? 'text-purple-400' : 'text-gray-300'
+            className={`border-2 hover:scale-105 transition-all ${
+              isShuffled 
+                ? 'text-purple-400 border-purple-400 bg-purple-400/25 shadow-lg shadow-purple-400/30 font-semibold' 
+                : 'text-gray-400 border-gray-500 hover:bg-gray-700'
             }`}
             title={isShuffled ? '關閉隨機播放' : '開啟隨機播放'}
           >
-            <Shuffle className={`w-4 h-4 ${isShuffled ? 'fill-current' : ''}`} />
+            <Shuffle className={`w-5 h-5 ${isShuffled ? 'fill-current' : ''}`} />
           </Button>
 
           {/* 喜歡 */}
@@ -228,32 +237,42 @@ export const NowPlaying: React.FC<NowPlayingProps> = ({
           </Button>
         </div>
 
-        {/* Volume Control */}
+        {/* Volume Control - 顯示相對進度百分比 */}
         <div className="flex items-center gap-3">
           <Button
             variant="outline"
             size="sm"
             onClick={onToggleMute}
-            className="border-gray-600 text-gray-300 hover:bg-gray-700 p-2"
+            className={`border-2 p-2 hover:scale-105 transition-all ${
+              isMuted 
+                ? 'text-red-400 border-red-400 bg-red-400/25 shadow-lg shadow-red-400/30 font-semibold hover:bg-red-400/35' 
+                : 'text-gray-300 border-gray-600 hover:bg-gray-700'
+            }`}
             title={isMuted ? "取消靜音" : "靜音"}
           >
             {isMuted ? (
-              <VolumeX className="w-4 h-4" />
+              <VolumeX className="w-5 h-5 fill-current" />
             ) : (
-              <Volume2 className="w-4 h-4" />
+              <Volume2 className="w-5 h-5" />
             )}
           </Button>
-          <Slider
-            value={[volume]}
-            onValueChange={(value) => onVolumeChange(value[0])}
-            max={100}
-            step={1}
-            className="flex-1"
-            disabled={isMuted}
-          />
-          <span className="text-sm text-gray-400 w-8">
-            {isMuted ? '0' : volume}
-          </span>
+          <div className="flex-1 space-y-1">
+            <Slider
+              value={[volume]}
+              onValueChange={(value) => onVolumeChange(value[0])}
+              max={100}
+              step={1}
+              className="w-full cursor-pointer"
+              disabled={isMuted}
+              title="拖動調整音量"
+            />
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-gray-500">拖動調整音量</span>
+              <span className="text-gray-300 font-medium">
+                {isMuted ? '0%' : `${volume}%`}
+              </span>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

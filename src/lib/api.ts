@@ -176,7 +176,16 @@ export const api = {
   currentSong: async (): Promise<CurrentSong> => {
     try {
       const data = await j<any>('/song');
+      
+      // Debug: 記錄完整的 API 響應
+      console.log('[API DEBUG] currentSong response:', JSON.stringify(data, null, 2));
+      console.log('[API DEBUG] elapsedSeconds:', data?.elapsedSeconds, 'type:', typeof data?.elapsedSeconds);
+      console.log('[API DEBUG] songDuration:', data?.songDuration, 'type:', typeof data?.songDuration);
+      console.log('[API DEBUG] isPaused:', data?.isPaused, 'type:', typeof data?.isPaused);
+      console.log('[API DEBUG] videoId:', data?.videoId);
+      
       if (!data) {
+        console.warn('[API DEBUG] No data returned from /song endpoint');
         return { videoId: null };
       }
       
@@ -189,16 +198,42 @@ export const api = {
         thumbnail = `https://i.ytimg.com/vi/${data.videoId}/hqdefault.jpg`;
       }
       
-      return {
+      // 嘗試多種可能的字段名
+      const elapsedSeconds = data.elapsedSeconds ?? 
+                            data.elapsed ?? 
+                            data.currentTime ?? 
+                            data.time ?? 
+                            (typeof data.elapsedSeconds === 'number' ? data.elapsedSeconds : 0);
+      
+      const songDuration = data.songDuration ?? 
+                          data.duration ?? 
+                          data.length ?? 
+                          (typeof data.songDuration === 'number' ? data.songDuration : 0);
+      
+      const isPaused = data.isPaused ?? 
+                      data.paused ?? 
+                      (data.state === 'paused') ?? 
+                      true;
+      
+      const result = {
         videoId: data.videoId || null,
         title: data.title || '',
         artist: data.artist || '',
-        isPaused: data.isPaused ?? true,
-        elapsedSeconds: data.elapsedSeconds || 0,
-        songDuration: data.songDuration || 0,
+        isPaused: isPaused,
+        // 注意：YTMD API 可能無法正確返回 elapsedSeconds，總是返回 0
+        // 我們仍然返回 API 的值，但前端計時器會處理實際的進度更新
+        elapsedSeconds: typeof elapsedSeconds === 'number' ? elapsedSeconds : 0,
+        songDuration: typeof songDuration === 'number' ? songDuration : 0,
       };
+      
+      console.log('[API DEBUG] Parsed result:', result);
+      if (result.elapsedSeconds === 0 && !isPaused && result.songDuration > 0) {
+        console.warn('[API DEBUG] WARNING: API returned elapsedSeconds=0 but song is playing. This is likely an API limitation. Frontend timer will handle progress.');
+      }
+      
+      return result;
     } catch (error) {
-      console.error('Failed to get current song:', error);
+      console.error('[API DEBUG] Failed to get current song:', error);
       return { videoId: null };
     }
   },
@@ -279,10 +314,31 @@ export const api = {
   },
   
   // Seek
-  seek: (seconds: number) => j<void>('/seek-to', {
-    method: 'POST',
-    body: JSON.stringify({ seconds }),
-  }),
+  seek: async (seconds: number): Promise<number> => {
+    try {
+      // 設置進度
+      await j<void>('/seek-to', {
+        method: 'POST',
+        body: JSON.stringify({ seconds }),
+      });
+      // 設置後立即獲取當前狀態（如果 API 支持）
+      try {
+        const cs = await api.currentSong();
+        const actualTime = Math.max(0, Math.round(cs.elapsedSeconds || 0));
+        console.log('[API DEBUG] Seek to', seconds, 'API returned elapsedSeconds:', actualTime);
+        // 如果 API 返回有效值（接近設置的值），使用 API 的值；否則使用設置的值
+        if (actualTime > 0 || Math.abs(actualTime - seconds) < 5) {
+          return actualTime;
+        }
+      } catch {
+        // 如果獲取失敗，返回設置的值
+      }
+      return seconds;
+    } catch (error) {
+      console.error('[API DEBUG] Failed to seek:', error);
+      throw error;
+    }
+  },
   
   // Go back/forward
   goBack: (seconds: number) => j<void>('/go-back', {
@@ -298,17 +354,65 @@ export const api = {
   volume: {
     get: async (): Promise<{ state: number; isMuted: boolean }> => {
       try {
-        const data = await j<{ state: number; isMuted: boolean }>('/volume');
-        return data || { state: 0, isMuted: false };
+        const data = await j<any>('/volume');
+        
+        // Debug: 記錄完整的 API 響應
+        console.log('[API DEBUG] volume response:', JSON.stringify(data, null, 2));
+        console.log('[API DEBUG] volume.state:', data?.state, 'type:', typeof data?.state);
+        console.log('[API DEBUG] volume.isMuted:', data?.isMuted, 'type:', typeof data?.isMuted);
+        
+        // 嘗試多種可能的字段名
+        const state = data?.state ?? 
+                     data?.volume ?? 
+                     data?.level ?? 
+                     (typeof data?.state === 'number' ? data.state : 0);
+        
+        const isMuted = data?.isMuted ?? 
+                       data?.muted ?? 
+                       (data?.state === 0 && state === 0) ??
+                       false;
+        
+        const result = {
+          state: typeof state === 'number' ? state : 0,
+          isMuted: typeof isMuted === 'boolean' ? isMuted : false,
+        };
+        
+        console.log('[API DEBUG] Parsed volume result:', result);
+        if (result.state === 0 && !result.isMuted) {
+          console.warn('[API DEBUG] WARNING: API returned volume=0 but not muted. This may be an API limitation. Frontend state will be preserved if local volume > 0.');
+        }
+        
+        return result;
       } catch (error) {
-        console.error('Failed to get volume:', error);
+        console.error('[API DEBUG] Failed to get volume:', error);
         return { state: 0, isMuted: false };
       }
     },
-    set: (v: number) => j<void>('/volume', {
-      method: 'POST',
-      body: JSON.stringify({ volume: v }),
-    }),
+    set: async (v: number): Promise<{ state: number; isMuted: boolean }> => {
+      try {
+        // 設置音量
+        await j<void>('/volume', {
+          method: 'POST',
+          body: JSON.stringify({ volume: v }),
+        });
+        // 設置後立即獲取當前狀態（如果 API 支持）
+        // 如果 API 不支持，返回設置的值
+        try {
+          const current = await api.volume.get();
+          console.log('[API DEBUG] Volume set to', v, 'API returned:', current);
+          // 如果 API 返回有效值，使用 API 的值；否則使用設置的值
+          if (current.state > 0 || (current.state === 0 && v === 0)) {
+            return current;
+          }
+        } catch {
+          // 如果獲取失敗，返回設置的值
+        }
+        return { state: v, isMuted: false };
+      } catch (error) {
+        console.error('[API DEBUG] Failed to set volume:', error);
+        throw error;
+      }
+    },
   },
   
   // Queue management
