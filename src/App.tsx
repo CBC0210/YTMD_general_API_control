@@ -624,32 +624,38 @@ export default function App() {
     // 檢查當前歌曲是否已被當前用戶點贊
     const isLiked = likedSongs.some((likedSong) => (likedSong.videoId || likedSong.id) === songId);
     
-    if (isLiked) {
-      // 取消點贊
-      userStorage.unlikeSong(nickname, songId);
-      setLikeState('INDIFFERENT');
-    } else {
-      // 點贊
-      userStorage.likeSong(nickname, {
-        videoId: songId,
-        title: song.title,
-        artist: song.artist,
-        duration: song.duration,
-        thumbnail: song.thumbnail,
-      });
-      setLikeState('LIKE');
-    }
-    
-    // 更新喜歡的歌曲列表
-    const likes = userStorage.getLikes(nickname);
-    setLikedSongs((likes || []).map((x: any) => ({
-      id: x.videoId,
-      videoId: x.videoId,
-      title: x.title,
-      artist: x.artist,
-      duration: x.duration,
-      thumbnail: x.thumbnail,
-    })));
+    (async () => {
+      try {
+        if (isLiked) {
+          // 取消點贊
+          await userStorage.unlikeSong(nickname, songId);
+          setLikeState('INDIFFERENT');
+        } else {
+          // 點贊
+          await userStorage.likeSong(nickname, {
+            videoId: songId,
+            title: song.title,
+            artist: song.artist,
+            duration: song.duration,
+            thumbnail: song.thumbnail,
+          });
+          setLikeState('LIKE');
+        }
+        
+        // 更新喜歡的歌曲列表
+        const likes = await userStorage.getLikes(nickname);
+        setLikedSongs((likes || []).map((x: any) => ({
+          id: x.videoId,
+          videoId: x.videoId,
+          title: x.title,
+          artist: x.artist,
+          duration: x.duration,
+          thumbnail: x.thumbnail,
+        })));
+      } catch (error) {
+        console.error('[APP] Failed to toggle like:', error);
+      }
+    })();
     
     // 刷新推薦
     refreshRecommendations();
@@ -774,18 +780,23 @@ export default function App() {
         // console.log('[INIT DEBUG] Initial shuffle:', shuffle);
         setIsShuffled(shuffle);
         
-        // 從用戶設定（localStorage）獲取點贊狀態，而不是從 API
+        // 從用戶設定（伺服器）獲取點贊狀態，而不是從 API
         if (saved && cs.videoId) {
-          const likes = userStorage.getLikes(saved);
-          const isLiked = likes.some((likedSong: any) => likedSong.videoId === cs.videoId);
-          // console.log('[INIT DEBUG] Initial likeState from localStorage:', isLiked ? 'LIKE' : 'INDIFFERENT');
-          setLikeState(isLiked ? 'LIKE' : 'INDIFFERENT');
+          try {
+            const likes = await userStorage.getLikes(saved);
+            const isLiked = likes.some((likedSong: any) => likedSong.videoId === cs.videoId);
+            // console.log('[INIT DEBUG] Initial likeState from server:', isLiked ? 'LIKE' : 'INDIFFERENT');
+            setLikeState(isLiked ? 'LIKE' : 'INDIFFERENT');
+          } catch (error) {
+            console.error('[APP] Failed to get initial like state:', error);
+            setLikeState(null);
+          }
         } else {
           setLikeState(null);
         }
         
         if (saved) {
-          loadUserData();
+          await loadUserData();
         }
         // console.log('[INIT DEBUG] Initialization complete');
       } catch (error) {
@@ -1012,22 +1023,28 @@ export default function App() {
                           );
                           
                           if (nickname) {
-                            userStorage.addHistory(nickname, {
-                              videoId: songId,
-                              title: s.title,
-                              artist: s.artist,
-                              duration: s.duration,
-                              thumbnail: s.thumbnail,
-                            });
-                            const hist = userStorage.getHistory(nickname);
-                            setHistory(hist.map((x: any) => ({
-                              id: x.videoId,
-                              videoId: x.videoId,
-                              title: x.title,
-                              artist: x.artist,
-                              duration: x.duration,
-                              thumbnail: x.thumbnail,
-                            })));
+                            (async () => {
+                              try {
+                                await userStorage.addHistory(nickname, {
+                                  videoId: songId,
+                                  title: s.title,
+                                  artist: s.artist,
+                                  duration: s.duration,
+                                  thumbnail: s.thumbnail,
+                                });
+                                const hist = await userStorage.getHistory(nickname);
+                                setHistory(hist.map((x: any) => ({
+                                  id: x.videoId,
+                                  videoId: x.videoId,
+                                  title: x.title,
+                                  artist: x.artist,
+                                  duration: x.duration,
+                                  thumbnail: x.thumbnail,
+                                })));
+                              } catch (error) {
+                                console.error('[APP] Failed to add history:', error);
+                              }
+                            })();
                           }
                           
                           const q = await api.queue();
@@ -1233,24 +1250,30 @@ export default function App() {
                     'INSERT_AFTER_CURRENT_VIDEO'
                   );
                   
-                  if (nickname) {
-                    userStorage.addHistory(nickname, {
-                      videoId: songId,
-                      title: s.title,
-                      artist: s.artist,
-                      duration: s.duration,
-                      thumbnail: s.thumbnail,
-                    });
-                    const hist = userStorage.getHistory(nickname);
-                    setHistory(hist.map((x: any) => ({
-                      id: x.videoId,
-                      videoId: x.videoId,
-                      title: x.title,
-                      artist: x.artist,
-                      duration: x.duration,
-                      thumbnail: x.thumbnail,
-                    })));
-                  }
+                          if (nickname) {
+                            (async () => {
+                              try {
+                                await userStorage.addHistory(nickname, {
+                                  videoId: songId,
+                                  title: s.title,
+                                  artist: s.artist,
+                                  duration: s.duration,
+                                  thumbnail: s.thumbnail,
+                                });
+                                const hist = await userStorage.getHistory(nickname);
+                                setHistory(hist.map((x: any) => ({
+                                  id: x.videoId,
+                                  videoId: x.videoId,
+                                  title: x.title,
+                                  artist: x.artist,
+                                  duration: x.duration,
+                                  thumbnail: x.thumbnail,
+                                })));
+                              } catch (error) {
+                                console.error('[APP] Failed to add history:', error);
+                              }
+                            })();
+                          }
                   
                   const q = await api.queue();
                   setPlayQueue(
@@ -1322,24 +1345,30 @@ export default function App() {
                       'INSERT_AFTER_CURRENT_VIDEO'
                     );
                     
-                    if (nickname) {
-                      userStorage.addHistory(nickname, {
-                        videoId: songId,
-                        title: s.title,
-                        artist: s.artist,
-                        duration: s.duration,
-                        thumbnail: s.thumbnail,
-                      });
-                      const hist = userStorage.getHistory(nickname);
-                      setHistory(hist.map((x: any) => ({
-                        id: x.videoId,
-                        videoId: x.videoId,
-                        title: x.title,
-                        artist: x.artist,
-                        duration: x.duration,
-                        thumbnail: x.thumbnail,
-                      })));
-                    }
+                          if (nickname) {
+                            (async () => {
+                              try {
+                                await userStorage.addHistory(nickname, {
+                                  videoId: songId,
+                                  title: s.title,
+                                  artist: s.artist,
+                                  duration: s.duration,
+                                  thumbnail: s.thumbnail,
+                                });
+                                const hist = await userStorage.getHistory(nickname);
+                                setHistory(hist.map((x: any) => ({
+                                  id: x.videoId,
+                                  videoId: x.videoId,
+                                  title: x.title,
+                                  artist: x.artist,
+                                  duration: x.duration,
+                                  thumbnail: x.thumbnail,
+                                })));
+                              } catch (error) {
+                                console.error('[APP] Failed to add history:', error);
+                              }
+                            })();
+                          }
                     
                     const q = await api.queue();
                     setPlayQueue(
@@ -1457,24 +1486,30 @@ export default function App() {
                               'INSERT_AFTER_CURRENT_VIDEO'
                             );
                             
-                            if (nickname) {
-                              userStorage.addHistory(nickname, {
-                                videoId: songId,
-                                title: s.title,
-                                artist: s.artist,
-                                duration: s.duration,
-                                thumbnail: s.thumbnail,
-                              });
-                              const hist = userStorage.getHistory(nickname);
-                              setHistory(hist.map((x: any) => ({
-                                id: x.videoId,
-                                videoId: x.videoId,
-                                title: x.title,
-                                artist: x.artist,
-                                duration: x.duration,
-                                thumbnail: x.thumbnail,
-                              })));
-                            }
+                          if (nickname) {
+                            (async () => {
+                              try {
+                                await userStorage.addHistory(nickname, {
+                                  videoId: songId,
+                                  title: s.title,
+                                  artist: s.artist,
+                                  duration: s.duration,
+                                  thumbnail: s.thumbnail,
+                                });
+                                const hist = await userStorage.getHistory(nickname);
+                                setHistory(hist.map((x: any) => ({
+                                  id: x.videoId,
+                                  videoId: x.videoId,
+                                  title: x.title,
+                                  artist: x.artist,
+                                  duration: x.duration,
+                                  thumbnail: x.thumbnail,
+                                })));
+                              } catch (error) {
+                                console.error('[APP] Failed to add history:', error);
+                              }
+                            })();
+                          }
                             
                             const q = await api.queue();
                             setPlayQueue(

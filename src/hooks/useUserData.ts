@@ -10,7 +10,7 @@ export function useUserData(nickname: string) {
   const [reco, setReco] = useState<Song[]>([]);
   const [recoLoading, setRecoLoading] = useState(false);
 
-  const loadUserData = useCallback(() => {
+  const loadUserData = useCallback(async () => {
     if (!nickname || !nickname.trim()) {
       console.log('[USER DATA] No nickname provided, clearing user data');
       setHistory([]);
@@ -20,8 +20,10 @@ export function useUserData(nickname: string) {
     }
     try {
       console.log(`[USER DATA] Loading data for user: "${nickname}"`);
-      const hist = userStorage.getHistory(nickname);
-      const likes = userStorage.getLikes(nickname);
+      const [hist, likes] = await Promise.all([
+        userStorage.getHistory(nickname),
+        userStorage.getLikes(nickname),
+      ]);
       const historyMapped = (hist || []).map((x: any) => ({
         id: x.videoId,
         videoId: x.videoId,
@@ -49,45 +51,61 @@ export function useUserData(nickname: string) {
     }
   }, [nickname]);
 
-  const addToHistory = useCallback((song: Song) => {
+  const addToHistory = useCallback(async (song: Song) => {
     if (!nickname) return;
-    userStorage.addHistory(nickname, {
-      videoId: song.videoId || song.id,
-      title: song.title,
-      artist: song.artist,
-      duration: song.duration,
-      thumbnail: song.thumbnail,
-    });
-    loadUserData();
-  }, [nickname, loadUserData]);
-
-  const removeFromHistory = useCallback((videoId: string) => {
-    if (!nickname) return;
-    userStorage.removeHistoryItem(nickname, videoId);
-    loadUserData();
-  }, [nickname, loadUserData]);
-
-  const clearHistory = useCallback(() => {
-    if (!nickname) return;
-    userStorage.clearHistory(nickname);
-    loadUserData();
-  }, [nickname, loadUserData]);
-
-  const toggleLike = useCallback((song: Song) => {
-    if (!nickname) return;
-    const isLiked = likedSongs.some((likedSong) => (likedSong.videoId || likedSong.id) === (song.videoId || song.id));
-    if (isLiked) {
-      userStorage.unlikeSong(nickname, song.videoId || song.id);
-    } else {
-      userStorage.likeSong(nickname, {
+    try {
+      await userStorage.addHistory(nickname, {
         videoId: song.videoId || song.id,
         title: song.title,
         artist: song.artist,
         duration: song.duration,
         thumbnail: song.thumbnail,
       });
+      await loadUserData();
+    } catch (error) {
+      console.error('[USER DATA] Failed to add to history:', error);
     }
-    loadUserData();
+  }, [nickname, loadUserData]);
+
+  const removeFromHistory = useCallback(async (videoId: string) => {
+    if (!nickname) return;
+    try {
+      await userStorage.removeHistoryItem(nickname, videoId);
+      await loadUserData();
+    } catch (error) {
+      console.error('[USER DATA] Failed to remove from history:', error);
+    }
+  }, [nickname, loadUserData]);
+
+  const clearHistory = useCallback(async () => {
+    if (!nickname) return;
+    try {
+      await userStorage.clearHistory(nickname);
+      await loadUserData();
+    } catch (error) {
+      console.error('[USER DATA] Failed to clear history:', error);
+    }
+  }, [nickname, loadUserData]);
+
+  const toggleLike = useCallback(async (song: Song) => {
+    if (!nickname) return;
+    try {
+      const isLiked = likedSongs.some((likedSong) => (likedSong.videoId || likedSong.id) === (song.videoId || song.id));
+      if (isLiked) {
+        await userStorage.unlikeSong(nickname, song.videoId || song.id);
+      } else {
+        await userStorage.likeSong(nickname, {
+          videoId: song.videoId || song.id,
+          title: song.title,
+          artist: song.artist,
+          duration: song.duration,
+          thumbnail: song.thumbnail,
+        });
+      }
+      await loadUserData();
+    } catch (error) {
+      console.error('[USER DATA] Failed to toggle like:', error);
+    }
   }, [nickname, likedSongs, loadUserData]);
 
   const refreshRecommendations = useCallback(async () => {
@@ -95,7 +113,7 @@ export function useUserData(nickname: string) {
     setRecoLoading(true);
     try {
       // Get recommendation structure (first 2 + search hints)
-      const recData = userStorage.getRecommendations(nickname, 10);
+      const recData = await userStorage.getRecommendations(nickname, 10);
       
       // Handle old format (direct array) for backward compatibility
       if (Array.isArray(recData)) {

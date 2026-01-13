@@ -1,0 +1,18 @@
+[Unit]
+Description=YTMD User Data API Server
+After=network.target
+
+[Service]
+Type=simple
+User=dorm
+WorkingDirectory=/opt/YTMD_general_API_control
+Environment="NODE_ENV=production"
+Environment="PORT=3001"
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
