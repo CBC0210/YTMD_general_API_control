@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { userStorage } from "../lib/userStorage";
 import { api } from "../lib/api";
 import { parseSearchResponse } from "../features/search/searchService";
@@ -11,35 +11,42 @@ export function useUserData(nickname: string) {
   const [recoLoading, setRecoLoading] = useState(false);
 
   const loadUserData = useCallback(() => {
-    if (!nickname) {
+    if (!nickname || !nickname.trim()) {
+      console.log('[USER DATA] No nickname provided, clearing user data');
       setHistory([]);
       setLikedSongs([]);
       setReco([]);
       return;
     }
     try {
+      console.log(`[USER DATA] Loading data for user: "${nickname}"`);
       const hist = userStorage.getHistory(nickname);
       const likes = userStorage.getLikes(nickname);
-      setHistory((hist || []).map((x: any) => ({
+      const historyMapped = (hist || []).map((x: any) => ({
         id: x.videoId,
         videoId: x.videoId,
         title: x.title,
         artist: x.artist,
         duration: x.duration,
         thumbnail: x.thumbnail,
-      })));
-      setLikedSongs((likes || []).map((x: any) => ({
+      }));
+      const likesMapped = (likes || []).map((x: any) => ({
         id: x.videoId,
         videoId: x.videoId,
         title: x.title,
         artist: x.artist,
         duration: x.duration,
         thumbnail: x.thumbnail,
-      })));
+      }));
+      setHistory(historyMapped);
+      setLikedSongs(likesMapped);
+      console.log(`[USER DATA] Loaded ${historyMapped.length} history items and ${likesMapped.length} liked songs for "${nickname}"`);
       // Don't load recommendations in loadUserData - use refreshRecommendations instead
       // This avoids async issues and ensures recommendations are always fresh
       setReco([]);
-    } catch {}
+    } catch (error) {
+      console.error(`[USER DATA] Failed to load data for "${nickname}":`, error);
+    }
   }, [nickname]);
 
   const addToHistory = useCallback((song: Song) => {
@@ -210,6 +217,12 @@ export function useUserData(nickname: string) {
     }
     setRecoLoading(false);
   }, [nickname]);
+
+  // 當 nickname 改變時，自動重新載入資料
+  useEffect(() => {
+    console.log(`[USER DATA] Nickname changed to: "${nickname}"`);
+    loadUserData();
+  }, [nickname, loadUserData]);
 
   return {
     history,

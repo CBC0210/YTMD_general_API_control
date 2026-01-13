@@ -36,10 +36,16 @@ function getStorageData(): StorageData {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     if (data) {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // 驗證資料結構
+      if (!parsed.users || typeof parsed.users !== 'object') {
+        console.warn('[USER STORAGE] Invalid data structure, resetting to default');
+        return { users: {} };
+      }
+      return parsed;
     }
   } catch (error) {
-    console.error('Failed to read user storage:', error);
+    console.error('[USER STORAGE] Failed to read user storage:', error);
   }
   return { users: {} };
 }
@@ -49,9 +55,25 @@ function getStorageData(): StorageData {
  */
 function saveStorageData(data: StorageData): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    // 確保資料結構正確
+    if (!data.users || typeof data.users !== 'object') {
+      console.error('[USER STORAGE] Invalid data structure, cannot save');
+      return;
+    }
+    const jsonData = JSON.stringify(data);
+    localStorage.setItem(STORAGE_KEY, jsonData);
+    // 驗證保存是否成功
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved || saved !== jsonData) {
+      console.error('[USER STORAGE] Failed to verify saved data');
+    }
   } catch (error) {
-    console.error('Failed to save user storage:', error);
+    console.error('[USER STORAGE] Failed to save user storage:', error);
+    // 如果是存儲空間不足，嘗試清理舊資料
+    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+      console.warn('[USER STORAGE] Storage quota exceeded, attempting cleanup...');
+      // 可以考慮清理最舊的歷史記錄
+    }
   }
 }
 
@@ -79,6 +101,14 @@ export const userStorage = {
    * Add item to user history
    */
   addHistory(nickname: string, item: any): void {
+    if (!nickname || !nickname.trim()) {
+      console.warn('[USER STORAGE] Cannot add history: nickname is empty');
+      return;
+    }
+    if (!item || !item.videoId) {
+      console.warn('[USER STORAGE] Cannot add history: item is invalid', item);
+      return;
+    }
     const data = getStorageData();
     const user = ensureUser(nickname);
     
@@ -95,14 +125,21 @@ export const userStorage = {
     
     data.users[nickname] = user;
     saveStorageData(data);
+    console.log(`[USER STORAGE] Added to history for "${nickname}":`, item.videoId, `(total: ${user.history.length} items)`);
   },
 
   /**
    * Get user history
    */
   getHistory(nickname: string): any[] {
+    if (!nickname || !nickname.trim()) {
+      console.warn('[USER STORAGE] Cannot get history: nickname is empty');
+      return [];
+    }
     const user = getUser(nickname);
-    return user.history || [];
+    const history = user.history || [];
+    console.log(`[USER STORAGE] Retrieved history for "${nickname}": ${history.length} items`);
+    return history;
   },
 
   /**
@@ -133,7 +170,14 @@ export const userStorage = {
    * Add song to likes
    */
   likeSong(nickname: string, item: any): void {
-    if (!item || !item.videoId) return;
+    if (!nickname || !nickname.trim()) {
+      console.warn('[USER STORAGE] Cannot like song: nickname is empty');
+      return;
+    }
+    if (!item || !item.videoId) {
+      console.warn('[USER STORAGE] Cannot like song: item is invalid', item);
+      return;
+    }
     
     const data = getStorageData();
     const user = ensureUser(nickname);
@@ -147,6 +191,9 @@ export const userStorage = {
       user.likes.push(item);
       data.users[nickname] = user;
       saveStorageData(data);
+      console.log(`[USER STORAGE] Added to likes for "${nickname}":`, item.videoId, `(total: ${user.likes.length} items)`);
+    } else {
+      console.log(`[USER STORAGE] Song already liked for "${nickname}":`, item.videoId);
     }
   },
 
@@ -167,8 +214,14 @@ export const userStorage = {
    * Get user likes
    */
   getLikes(nickname: string): any[] {
+    if (!nickname || !nickname.trim()) {
+      console.warn('[USER STORAGE] Cannot get likes: nickname is empty');
+      return [];
+    }
     const user = getUser(nickname);
-    return user.likes || [];
+    const likes = user.likes || [];
+    console.log(`[USER STORAGE] Retrieved likes for "${nickname}": ${likes.length} items`);
+    return likes;
   },
 
   /**
